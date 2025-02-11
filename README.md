@@ -1,3 +1,9 @@
+## ⚠️ Warning
+
+This package is a work-in-progress. I'm not a PHP developer and since I do not know much about Mautic or its ecosystem this package should not be used publicly.
+I implemented Postmark support for my own mautic instance because Mautic v5 does not support Postmark anymore and v4 is deprecated.
+Since Mautic is a big frustration for me since minute 1, I'm probably abandoning this package soon.
+
 ### Mautic Postmark Plugin
 
 This plugin enable Mautic 5 to run Postmark as an email transport. Features:
