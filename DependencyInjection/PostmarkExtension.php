@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace MauticPlugin\SparkpostBundle\DependencyInjection;
+namespace MauticPlugin\PostmarkBundle\DependencyInjection;
 
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\Extension;
 use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
 
-class SparkpostExtension extends Extension
+class PostmarkExtension extends Extension
 {
     public function load(array $configs, ContainerBuilder $container): void
     {

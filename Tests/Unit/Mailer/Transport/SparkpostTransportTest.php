@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace MauticPlugin\SparkpostBundle\Tests\Unit\Mailer\Transport;
+namespace MauticPlugin\PostmarkBundle\Tests\Unit\Mailer\Transport;
 
 use Mautic\EmailBundle\Mailer\Message\MauticMessage;
 use Mautic\EmailBundle\Model\TransportCallback;
-use MauticPlugin\SparkpostBundle\Mailer\Transport\SparkpostTransport;
+use MauticPlugin\PostmarkBundle\Mailer\Transport\PostmarkTransport;
 use PHPUnit\Framework\Assert;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -19,7 +19,7 @@ use Symfony\Component\Mime\Email;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 
-class SparkpostTransportTest extends TestCase
+class PostmarkTransportTest extends TestCase
 {
     private TransportCallback|MockObject $transportCallbackMock;
 
@@ -29,7 +29,7 @@ class SparkpostTransportTest extends TestCase
 
     private LoggerInterface|MockObject $loggerMock;
 
-    private SparkpostTransport $transport;
+    private PostmarkTransport $transport;
 
     protected function setUp(): void
     {
@@ -37,7 +37,7 @@ class SparkpostTransportTest extends TestCase
         $this->httpClientMock        = $this->createMock(HttpClientInterface::class);
         $this->eventDispatcherMock   = $this->createMock(EventDispatcherInterface::class);
         $this->loggerMock            = $this->createMock(LoggerInterface::class);
-        $this->transport             = new SparkpostTransport(
+        $this->transport             = new PostmarkTransport(
             'api-key',
             'some-region',
             $this->transportCallbackMock,

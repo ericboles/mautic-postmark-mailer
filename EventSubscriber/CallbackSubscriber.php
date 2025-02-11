@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace MauticPlugin\SparkpostBundle\EventSubscriber;
+namespace MauticPlugin\PostmarkBundle\EventSubscriber;
 
 use Mautic\CoreBundle\Helper\CoreParametersHelper;
 use Mautic\EmailBundle\EmailEvents;
 use Mautic\EmailBundle\Event\TransportWebhookEvent;
 use Mautic\EmailBundle\Model\TransportCallback;
 use Mautic\LeadBundle\Entity\DoNotContact;
-use MauticPlugin\SparkpostBundle\Mailer\Transport\SparkpostTransport;
+use MauticPlugin\PostmarkBundle\Mailer\Transport\PostmarkTransport;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Mailer\Transport\Dsn;
@@ -36,103 +36,43 @@ class CallbackSubscriber implements EventSubscriberInterface
     {
         $dsn = Dsn::fromString($this->coreParametersHelper->get('mailer_dsn'));
 
-        if (SparkpostTransport::MAUTIC_SPARKPOST_API_SCHEME !== $dsn->getScheme()) {
+        if (PostmarkTransport::MAUTIC_POSTMARK_API_SCHEME !== $dsn->getScheme()) {
             return;
         }
 
         $payload = $event->getRequest()->request->all();
 
-        foreach ($payload as $msys) {
-            $msys         = $msys['msys'] ?? null;
-            $messageEvent = $msys['message_event'] ?? $msys['unsubscribe_event'] ?? null;
+        foreach ($payload as $postmarkPayload){
+            $messageType = $postmarkPayload['RecordType'] ?? null;
 
-            if (!$messageEvent) {
+            if ($messageType !== "SubscriptionChange") {
                 continue;
             }
 
-            if (isset($messageEvent['rcpt_type']) && 'to' !== $messageEvent['rcpt_type']) {
-                // Ignore cc/bcc
-                continue;
+            $reason = $postmarkPayload['SuppressionReason'];
+            $suppressSending = filter_var($postmarkPayload['SuppressSending'], FILTER_VALIDATE_BOOLEAN);
+            
+
+            $recipient = $postmarkPayload['Recipient'] ?? null;
+
+            switch($reason){
+                case 'ManualSuppression':
+                    $this->transportCallback->addFailureByAddress($recipient, 'unsubscribed', DoNotContact::UNSUBSCRIBED);
+                    break;
+                case 'HardBounce':
+                    $this->transportCallback->addFailureByAddress($recipient, 'hard_bounce');
+                    break;
+                case 'SpamComplaint':
+                    $this->transportCallback->addFailureByAddress($recipient, 'spam_complaint', DoNotContact::UNSUBSCRIBED);
+                    break;
+                default:
+                    break;
             }
-
-            $type        = $messageEvent['type'] ?? null;
-            $bounceClass = $messageEvent['bounce_class'] ?? null;
-
-            if (('bounce' === $type && !in_array((int) $bounceClass, [10, 25, 26, 30, 90]))
-                || ('out_of_band' === $type && 60 === (int) $bounceClass)
-            ) {
-                // Only parse hard bounces - https://support.sparkpost.com/docs/deliverability/bounce-classification-codes
-                continue;
-            }
-
-            $hashId = $messageEvent['rcpt_meta']['hashId'] ?? null;
-
-            if ($hashId) {
-                $this->processCallbackByHashId($hashId, $messageEvent);
-
-                continue;
-            }
-
-            $rcptTo = $messageEvent['rcpt_to'] ?? '';
-            $this->processCallbackByEmailAddress($rcptTo, $messageEvent);
+            $this->transportCallback->processCallbackByEmailAddress($hashId, $rawReason);
         }
 
         $event->setResponse(new Response('Callback processed'));
     }
 
-    /**
-     * @param string       $hashId
-     * @param array<mixed> $event
-     */
-    private function processCallbackByHashId($hashId, array $event): void
-    {
-        $type = $event['type'] ?? null;
 
-        switch ($type) {
-            case 'policy_rejection':
-            case 'out_of_band':
-            case 'bounce':
-                $rawReason = $event['raw_reason'] ?? '';
-                $this->transportCallback->addFailureByHashId($hashId, $rawReason);
-                break;
-            case 'spam_complaint':
-                $fbType = $event['fbtype'] ?? '';
-                $this->transportCallback->addFailureByHashId($hashId, $fbType, DoNotContact::UNSUBSCRIBED);
-                break;
-            case 'list_unsubscribe':
-            case 'link_unsubscribe':
-                $this->transportCallback->addFailureByHashId($hashId, 'unsubscribed', DoNotContact::UNSUBSCRIBED);
-                break;
-            default:
-                break;
-        }
-    }
-
-    /**
-     * @param string       $email
-     * @param array<mixed> $event
-     */
-    private function processCallbackByEmailAddress($email, array $event): void
-    {
-        $type = $event['type'] ?? null;
-
-        switch ($type) {
-            case 'policy_rejection':
-            case 'out_of_band':
-            case 'bounce':
-                $rawReason = $event['raw_reason'] ?? '';
-                $this->transportCallback->addFailureByAddress($email, $rawReason);
-                break;
-            case 'spam_complaint':
-                $fbType = $event['fbtype'] ?? '';
-                $this->transportCallback->addFailureByAddress($email, $fbType, DoNotContact::UNSUBSCRIBED);
-                break;
-            case 'list_unsubscribe':
-            case 'link_unsubscribe':
-                $this->transportCallback->addFailureByAddress($email, 'unsubscribed', DoNotContact::UNSUBSCRIBED);
-                break;
-            default:
-                break;
-        }
-    }
 }

@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace MauticPlugin\SparkpostBundle\Mailer\Factory;
+namespace MauticPlugin\PostmarkBundle\Mailer\Factory;
 
 use Mautic\EmailBundle\Model\TransportCallback;
-use MauticPlugin\SparkpostBundle\Mailer\Transport\SparkpostTransport;
+use MauticPlugin\PostmarkBundle\Mailer\Transport\PostmarkTransport;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\Mailer\Exception\InvalidArgumentException;
@@ -16,7 +16,7 @@ use Symfony\Component\Mailer\Transport\TransportInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
-class SparkpostTransportFactory extends AbstractTransportFactory
+class PostmarkTransportFactory extends AbstractTransportFactory
 {
     public function __construct(
         private TransportCallback $transportCallback,
@@ -33,21 +33,21 @@ class SparkpostTransportFactory extends AbstractTransportFactory
      */
     protected function getSupportedSchemes(): array
     {
-        return [SparkpostTransport::MAUTIC_SPARKPOST_API_SCHEME];
+        return [PostmarkTransport::MAUTIC_POSTMARK_API_SCHEME];
     }
 
     public function create(Dsn $dsn): TransportInterface
     {
-        if (SparkpostTransport::MAUTIC_SPARKPOST_API_SCHEME === $dsn->getScheme()) {
-            if (!$region = $dsn->getOption('region')) {
-                throw new InvalidArgumentException($this->translator->trans('mautic.sparkpost.plugin.region.empty', [], 'validators'));
+        if (PostmarkTransport::MAUTIC_POSTMARK_API_SCHEME === $dsn->getScheme()) {
+            if (!$region = $dsn->getOption('messageStream')) {
+                throw new InvalidArgumentException($this->translator->trans('mautic.postmark.plugin.stream.empty', [], 'validators'));
             }
 
-            if (!array_key_exists($region, SparkpostTransport::SPARK_POST_HOSTS)) {
-                throw new InvalidArgumentException($this->translator->trans('mautic.sparkpost.plugin.region.invalid', [], 'validators'));
-            }
+            // if (!array_key_exists($region, PostmarkTransport::POSTMARK_HOSTS)) {
+            //     throw new InvalidArgumentException($this->translator->trans('mautic.postmark.plugin.region.invalid', [], 'validators'));
+            // }
 
-            return new SparkpostTransport(
+            return new PostmarkTransport(
                 $this->getPassword($dsn),
                 $region,
                 $this->transportCallback,
@@ -57,6 +57,6 @@ class SparkpostTransportFactory extends AbstractTransportFactory
             );
         }
 
-        throw new UnsupportedSchemeException($dsn, 'sparkpost', $this->getSupportedSchemes());
+        throw new UnsupportedSchemeException($dsn, 'postmark', $this->getSupportedSchemes());
     }
 }

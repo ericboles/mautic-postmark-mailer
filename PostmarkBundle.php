@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace MauticPlugin\SparkpostBundle;
+namespace MauticPlugin\PostmarkBundle;
 
 use Mautic\IntegrationsBundle\Bundle\AbstractPluginBundle;
 
-class SparkpostBundle extends AbstractPluginBundle
+class PostmarkBundle extends AbstractPluginBundle
 {
 }

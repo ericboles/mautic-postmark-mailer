@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use MauticPlugin\SparkpostBundle\Mailer\Factory\SparkpostTransportFactory;
+use MauticPlugin\PostmarkBundle\Mailer\Factory\PostmarkTransportFactory;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 
 return static function (ContainerConfigurator $configurator): void {
@@ -11,8 +11,8 @@ return static function (ContainerConfigurator $configurator): void {
         ->autowire()
         ->autoconfigure();
 
-    $services->load('MauticPlugin\\SparkpostBundle\\', '../')
-        ->exclude('../{Config,Helper/SparkpostResponse.php,Mailer/Transport/SparkpostTransport.php}');
+    $services->load('MauticPlugin\\PostmarkBundle\\', '../')
+        ->exclude('../{Config,Helper/PostmarkResponse.php,Mailer/Transport/PostmarkTransport.php}');
 
-    $services->get(SparkpostTransportFactory::class)->tag('mailer.transport_factory');
+    $services->get(PostmarkTransportFactory::class)->tag('mailer.transport_factory');
 };

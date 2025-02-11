@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 return [
-    'name'        => 'Sparkpost Plugin',
-    'description' => 'Sparkpost Mailer Plugin for Mautic',
+    'name'        => 'Postmark Plugin',
+    'description' => 'Postmark Mailer Plugin for Mautic',
     'version'     => '1.0.0',
-    'author'      => 'Acquia',
+    'author'      => 'forty8',
 ];

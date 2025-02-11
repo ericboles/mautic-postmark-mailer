@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace MauticPlugin\SparkpostBundle\Tests\Functional\EventSubscriber;
+namespace MauticPlugin\PostmarkBundle\Tests\Functional\EventSubscriber;
 
 use Mautic\CoreBundle\Helper\DateTimeHelper;
 use Mautic\CoreBundle\Test\MauticMysqlTestCase;
@@ -16,14 +16,14 @@ class CallbackSubscriberTest extends MauticMysqlTestCase
 {
     protected function setUp(): void
     {
-        if ('testSparkpostTransportNotConfigured' !== $this->getName()) {
-            $this->configParams['mailer_dsn'] = 'mautic+sparkpost+api://:some_api@some_host:25?region=us';
+        if ('testPostmarkTransportNotConfigured' !== $this->getName()) {
+            $this->configParams['mailer_dsn'] = 'mautic+postmark+api://:some_api@some_host:25?region=us';
         }
 
         parent::setUp();
     }
 
-    public function testSparkpostTransportNotConfigured(): void
+    public function testPostmarkTransportNotConfigured(): void
     {
         $this->client->request(Request::METHOD_POST, '/mailer/callback');
         $response = $this->client->getResponse();
@@ -34,7 +34,7 @@ class CallbackSubscriberTest extends MauticMysqlTestCase
     /**
      * @dataProvider provideMessageEventType
      */
-    public function testSparkpostCallbackProcessByHashId(string $type, string $bounceClass): void
+    public function testPostmarkCallbackProcessByHashId(string $type, string $bounceClass): void
     {
         $parameters                                          = $this->getParameters($type, $bounceClass);
         $parameters[0]['msys']['message_event']['rcpt_meta'] = ['hashId' => '65763254757234'];
@@ -70,7 +70,7 @@ class CallbackSubscriberTest extends MauticMysqlTestCase
     /**
      * @dataProvider provideMessageEventType
      */
-    public function testSparkpostCallbackProcessByEmailAddress(string $type, string $bounceClass): void
+    public function testPostmarkCallbackProcessByEmailAddress(string $type, string $bounceClass): void
     {
         $parameters = $this->getParameters($type, $bounceClass);
 

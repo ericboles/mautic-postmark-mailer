@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace MauticPlugin\SparkpostBundle\Tests\Unit\Mailer\Transport;
+namespace MauticPlugin\PostmarkBundle\Tests\Unit\Mailer\Transport;
 
 use Mautic\EmailBundle\Mailer\Message\MauticMessage;
 use Mautic\EmailBundle\Model\TransportCallback;
-use MauticPlugin\SparkpostBundle\Mailer\Transport\SparkpostTransport;
+use MauticPlugin\PostmarkBundle\Mailer\Transport\PostmarkTransport;
 use PHPUnit\Framework\Assert;
 use PHPUnit\Framework\TestCase;
 use Psr\EventDispatcher\EventDispatcherInterface;
@@ -14,7 +14,7 @@ use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\SentMessage;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
-class SparkpostTransportMessageTest extends TestCase
+class PostmarkTransportMessageTest extends TestCase
 {
     public function testCcAndBccFields(): void
     {
@@ -30,7 +30,7 @@ class SparkpostTransportMessageTest extends TestCase
         $eventDispatcherMock   = $this->createMock(EventDispatcherInterface::class);
         $loggerMock            = $this->createMock(LoggerInterface::class);
 
-        $sparkpost = new SparkpostTransport(
+        $postmark = new PostmarkTransport(
             '1234',
             'us',
             $transportCallbackMock,
@@ -66,7 +66,7 @@ class SparkpostTransportMessageTest extends TestCase
         $sentMessageMock->method('getOriginalMessage')
             ->willReturn($message);
 
-        $payload = $this->invokeInaccessibleMethod($sparkpost, 'getSparkpostPayload', [$sentMessageMock]);
+        $payload = $this->invokeInaccessibleMethod($postmark, 'getPostmarkPayload', [$sentMessageMock]);
         Assert::assertEquals(sprintf('%s:%s', $emailId, $expectedInternalEmailName), $payload['campaign_id']);
         Assert::assertEquals('from@xx.xx', $payload['content']['from']);
         Assert::assertEquals('Test subject', $payload['content']['subject']);

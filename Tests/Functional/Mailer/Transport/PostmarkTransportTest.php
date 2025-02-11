@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace MauticPlugin\SparkpostBundle\Tests\Functional\Mailer\Transport;
+namespace MauticPlugin\PostmarkBundle\Tests\Functional\Mailer\Transport;
 
 use Mautic\CoreBundle\Helper\UserHelper;
 use Mautic\CoreBundle\Test\MauticMysqlTestCase;
@@ -15,13 +15,13 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
-class SparkpostTransportTest extends MauticMysqlTestCase
+class PostmarkTransportTest extends MauticMysqlTestCase
 {
     private TranslatorInterface $translator;
 
     protected function setUp(): void
     {
-        $this->configParams['mailer_dsn']            = 'mautic+sparkpost+api://:some_api@some_host:25?region=us';
+        $this->configParams['mailer_dsn']            = 'mautic+postmark+api://:some_api@some_host:25?region=us';
         $this->configParams['messenger_dsn_email']   = 'sync://';
         $this->configParams['mailer_custom_headers'] = ['x-global-custom-header' => 'value123'];
         $this->configParams['mailer_from_email']     = 'admin@mautic.test';
@@ -35,15 +35,15 @@ class SparkpostTransportTest extends MauticMysqlTestCase
         $expectedResponses = [
             function ($method, $url, $options): MockResponse {
                 Assert::assertSame(Request::METHOD_POST, $method);
-                Assert::assertSame('https://api.sparkpost.com/api/v1/utils/content-previewer/', $url);
-                $this->assertSparkpostRequestBody($options['body']);
+                Assert::assertSame('https://api.postmark.com/api/v1/utils/content-previewer/', $url);
+                $this->assertPostmarkRequestBody($options['body']);
 
                 return new MockResponse('{"results": {"subject": "Hello there!", "html": "This is test body for {contactfield=email}!"}}');
             },
             function ($method, $url, $options): MockResponse {
                 Assert::assertSame(Request::METHOD_POST, $method);
-                Assert::assertSame('https://api.sparkpost.com/api/v1/transmissions/', $url);
-                $this->assertSparkpostRequestBody($options['body']);
+                Assert::assertSame('https://api.postmark.com/api/v1/transmissions/', $url);
+                $this->assertPostmarkRequestBody($options['body']);
 
                 return new MockResponse('{"results": {"total_rejected_recipients": 0, "total_accepted_recipients": 1, "id": "11668787484950529"}}');
             },
@@ -95,15 +95,15 @@ class SparkpostTransportTest extends MauticMysqlTestCase
         $expectedResponses = [
             function ($method, $url, $options): MockResponse {
                 Assert::assertSame(Request::METHOD_POST, $method);
-                Assert::assertSame('https://api.sparkpost.com/api/v1/utils/content-previewer/', $url);
-                $this->assertSparkpostTestRequestBody($options['body']);
+                Assert::assertSame('https://api.postmark.com/api/v1/utils/content-previewer/', $url);
+                $this->assertPostmarkTestRequestBody($options['body']);
 
                 return new MockResponse('{"results": {"subject": "Hello there!", "html": "This is test body for {contactfield=email}!"}}');
             },
             function ($method, $url, $options): MockResponse {
                 Assert::assertSame(Request::METHOD_POST, $method);
-                Assert::assertSame('https://api.sparkpost.com/api/v1/transmissions/', $url);
-                $this->assertSparkpostTestRequestBody($options['body']);
+                Assert::assertSame('https://api.postmark.com/api/v1/transmissions/', $url);
+                $this->assertPostmarkTestRequestBody($options['body']);
 
                 return new MockResponse('{"results": {"total_rejected_recipients": 0, "total_accepted_recipients": 1, "id": "11668787484950529"}}');
             },
@@ -117,7 +117,7 @@ class SparkpostTransportTest extends MauticMysqlTestCase
         Assert::assertSame('{"success":1,"message":"Success!"}', $this->client->getResponse()->getContent());
     }
 
-    private function assertSparkpostTestRequestBody(string $body): void
+    private function assertPostmarkTestRequestBody(string $body): void
     {
         $bodyArray = json_decode($body, true);
         Assert::assertSame('Admin <admin@mautic.test>', $bodyArray['content']['from']);
@@ -127,7 +127,7 @@ class SparkpostTransportTest extends MauticMysqlTestCase
         Assert::assertSame('Hi! This is a test email from Mautic. Testing...testing...1...2...3!', $bodyArray['content']['text']);
     }
 
-    private function assertSparkpostRequestBody(string $body): void
+    private function assertPostmarkRequestBody(string $body): void
     {
         $bodyArray = json_decode($body, true);
         Assert::assertSame('Admin User <admin@yoursite.com>', $bodyArray['content']['from']);
@@ -187,14 +187,14 @@ class SparkpostTransportTest extends MauticMysqlTestCase
             [
                 'config[emailconfig][mailer_dsn][options][list][0][value]' => '',
             ],
-            'mautic.sparkpost.plugin.region.empty',
+            'mautic.postmark.plugin.stream.empty',
         ];
 
         yield 'Invalid region' => [
             [
                 'config[emailconfig][mailer_dsn][options][list][0][value]' => 'invalid_region',
             ],
-            'mautic.sparkpost.plugin.region.invalid',
+            'mautic.postmark.plugin.region.invalid',
         ];
     }
 }

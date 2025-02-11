@@ -1,20 +1,23 @@
-### Mautic Sparkpost Plugin
+### Mautic Postmark Plugin
 
-This plugin enable Mautic 5 to run Sparkpost as an email transport. Features:
+This plugin enable Mautic 5 to run Postmark as an email transport. Features:
+
 - API transport. This transport can send up to 2000 emails per API request which makes it very fast compared to SMTP.
-- Bounce webhook handling. This plugin will unsubscribe contacts in Mautic based on the hard bounces while Sparkpost will take care of the soft bounce retrieals.
-
+- Bounce webhook handling. This plugin will unsubscribe contacts in Mautic based on the hard bounces while Postmark will take care of the soft bounce retrieals.
 
 #### Mautic Mailer DSN Scheme
-`mautic+sparkpost+api`
+
+`mautic+postmark+api`
 
 #### Mautic Mailer DSN Example
-`'mailer_dsn' => 'mautic+sparkpost+api://:<api_key>@default?region=<region>',`
-- api_key: Get Sparkpost API key from https://app.sparkpost.com/account/api-keys/create
-- options:
-  - region: `us` (SparkPost https://api.sparkpost.com/api/v1) OR `eu` (SparkPost EU https://api.eu.sparkpost.com/api/v1)
 
-<img width="1105" alt="sparkpost-email-dsn-example" src="Assets/img/sparkpost-email-dsn-example.png">
+`'mailer_dsn' => 'mautic+postmark+api://:<api_key>@default?stream=<stream>',`
+
+- api_key: Get Postmark API key from https://app.postmark.com/account/api-keys/create
+- options:
+  - stream: the postmark message stream
+
+<img width="1105" alt="postmark-email-dsn-example" src="Assets/img/postmark-email-dsn-example.png">
 
 ### Testing
 
