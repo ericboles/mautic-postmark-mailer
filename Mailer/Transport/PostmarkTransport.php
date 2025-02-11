@@ -190,4 +190,9 @@ class PostmarkTransport extends AbstractApiTransport implements TokenTransportIn
     {
         return ($this->host ?: self::HOST);
     }
+
+    public function getMaxBatchLimit(): int
+    {
+        return 500;
+    }
 }
