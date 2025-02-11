@@ -17,7 +17,7 @@ class CallbackSubscriberTest extends MauticMysqlTestCase
     protected function setUp(): void
     {
         if ('testPostmarkTransportNotConfigured' !== $this->getName()) {
-            $this->configParams['mailer_dsn'] = 'mautic+postmark+api://:some_api@some_host:25?region=us';
+            $this->configParams['mailer_dsn'] = 'mautic+postmark+api://:some_api@some_host:25?messageStream=my_broadcast';
         }
 
         parent::setUp();
@@ -34,14 +34,13 @@ class CallbackSubscriberTest extends MauticMysqlTestCase
     /**
      * @dataProvider provideMessageEventType
      */
-    public function testPostmarkCallbackProcessByHashId(string $type, string $bounceClass): void
+    public function testPostmarkCallbackProcessByAddress(string $bounceType): void
     {
-        $parameters                                          = $this->getParameters($type, $bounceClass);
-        $parameters[0]['msys']['message_event']['rcpt_meta'] = ['hashId' => '65763254757234'];
+        $parameters = $this->getParameters($bounceType);
 
-        $contact      = $this->createContact('contact@an.email');
+        $contact      = $this->createContact('bounced-address@wildbit.com');
         $now          = new \DateTime();
-        $stat         = $this->createStat($contact, '65763254757234', 'contact@an.email', $now);
+        $stat         = $this->createStat($contact, '65763254757234', 'bounced-address@wildbit.com', $now);
         $this->em->flush();
 
         $this->client->request(Request::METHOD_POST, '/mailer/callback', $parameters);
@@ -50,7 +49,7 @@ class CallbackSubscriberTest extends MauticMysqlTestCase
         Assert::assertSame(200, $response->getStatusCode());
 
         // Only parse hard bounces
-        if ('bounce' !== $type && '25' !== $bounceClass) {
+        if ('HardBounce' == $type) {
             $result = $this->getCommentAndReason($type);
 
             $openDetails = $stat->getOpenDetails();
@@ -70,9 +69,9 @@ class CallbackSubscriberTest extends MauticMysqlTestCase
     /**
      * @dataProvider provideMessageEventType
      */
-    public function testPostmarkCallbackProcessByEmailAddress(string $type, string $bounceClass): void
+    public function testPostmarkCallbackProcessByEmailAddress(string $type, string $bounceType): void
     {
-        $parameters = $this->getParameters($type, $bounceClass);
+        $parameters = $this->getParameters($type, $bounceType);
 
         $contact = $this->createContact('recipient@example.com');
         $this->em->flush();
@@ -86,7 +85,7 @@ class CallbackSubscriberTest extends MauticMysqlTestCase
         Assert::assertSame(200, $response->getStatusCode());
 
         // Only parse hard bounces
-        if ('bounce' !== $type && '25' !== $bounceClass) {
+        if ('bounce' !== $type && '25' !== $bounceType) {
             $result = $this->getCommentAndReason($type);
 
             $dnc = $contact->getDoNotContact()->current();
@@ -103,49 +102,32 @@ class CallbackSubscriberTest extends MauticMysqlTestCase
      */
     public function provideMessageEventType(): iterable
     {
-        yield ['policy_rejection', '25'];
-        yield ['out_of_band', '25'];
-        yield ['bounce', '25'];
-        yield ['bounce', '10'];
-        yield ['spam_complaint', '25'];
-        yield ['list_unsubscribe', '25'];
-        yield ['link_unsubscribe', '25'];
+        yield [ "ManualSuppression" ];
+        yield [ "HardBounce"];
+        yield [ "SpamComplaint"];
     }
 
     /**
      * @return array<mixed>
      */
-    private function getParameters(string $type, string $bounceClass): array
+    private function getParameters(string $supressionReason): array
     {
+
         return [
             [
-                'msys' => [
-                    'message_event' => [
-                        'type'             => $type,
-                        'campaign_id'      => 'Example Campaign Name',
-                        'customer_id'      => '1',
-                        'error_code'       => '554',
-                        'event_id'         => '92356927693813856',
-                        'friendly_from'    => 'sender@example.com',
-                        'message_id'       => '000443ee14578172be22',
-                        'msg_from'         => 'sender@example.com',
-                        'rcpt_tags'        => [
-                            'male',
-                            'US',
-                        ],
-                        'rcpt_to'          => 'recipient@example.com',
-                        'raw_rcpt_to'      => 'recipient@example.com',
-                        'rcpt_type'        => 'to',
-                        'raw_reason'       => 'MAIL REFUSED - IP (19.99.99.99) is in black list',
-                        'reason'           => 'MAIL REFUSED - IP (a.b.c.d) is in black list',
-                        'remote_addr'      => '127.0.0.1',
-                        'subaccount_id'    => '101',
-                        'template_id'      => 'templ-1234',
-                        'template_version' => '1',
-                        'timestamp'        => '1454442600',
-                        'transmission_id'  => '65832150921904138',
-                        'bounce_class'     => $bounceClass,
-                    ],
+                'RecordType'        => 'SubscriptionChange',
+                'MessageID'         => '883953f4-6105-42a2-a16a-77a8eac79483',
+                'ServerID'          => 123456,
+                'MessageStream'     => 'outbound',
+                'ChangedAt'         => '2020-02-01T10:53:34.416071Z',
+                'Recipient'         => 'bounced-address@wildbit.com',
+                'Origin'            => 'Recipient',
+                'SuppressSending'   => true,
+                'SuppressionReason' => $type,
+                'Tag'               => 'my-tag',
+                'Metadata'          => [
+                    'example'   => 'value',
+                    'example_2' => 'value',
                 ],
             ],
         ];
@@ -180,8 +162,8 @@ class CallbackSubscriberTest extends MauticMysqlTestCase
     private function getCommentAndReason(string $type): array
     {
         return match ($type) {
-            'policy_rejection', 'out_of_band', 'bounce' => [
-                'comments' => 'MAIL REFUSED - IP (19.99.99.99) is in black list',
+            'bounce' => [
+                'comments' => 'hard_bounce',
                 'reason'   => DoNotContact::BOUNCED,
             ],
             'spam_complaint'                            => [

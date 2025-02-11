@@ -49,7 +49,7 @@ class PostmarkTransportFactoryTest extends TestCase
             null,
             'postmark_api_key',
             null,
-            ['region' => 'us']
+            ['messageStream' => 'my_broadcast']
         );
         $postmarkTransport = $this->postmarkTransportFactory->create($dsn);
         Assert::assertInstanceOf(PostmarkTransport::class, $postmarkTransport);
@@ -65,20 +65,20 @@ class PostmarkTransportFactoryTest extends TestCase
             null,
             'postmark_api_key',
             null,
-            ['region' => 'us']
+            ['messageStream' => 'my_broadcast']
         );
         $this->postmarkTransportFactory->create($dsn);
     }
 
-    public function testEmptyPostmarkRegion(): void
+    public function testEmptyPostmarkStream(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage("Postmark region is empty. Add 'region' as a option.");
+        $this->expectExceptionMessage("Postmark messageStream is empty. Add 'messageStream' as a option.");
 
         $this->translatorMock->expects(self::once())
             ->method('trans')
-            ->with('mautic.postmark.plugin.region.empty', [], 'validators')
-            ->willReturn("Postmark region is empty. Add 'region' as a option.");
+            ->with('mautic.postmark.plugin.stream.empty', [], 'validators')
+            ->willReturn("Postmark messageStream is empty. Add 'messageStream' as a option.");
 
         $dsn = new Dsn(
             'mautic+postmark+api',
@@ -86,27 +86,6 @@ class PostmarkTransportFactoryTest extends TestCase
             null,
             'postmark_api_key',
             null,
-        );
-        $this->postmarkTransportFactory->create($dsn);
-    }
-
-    public function testInvalidPostmarkRegion(): void
-    {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage("Postmark region is invalid. Add 'us' or 'eu' as a suitable region.");
-
-        $this->translatorMock->expects(self::once())
-            ->method('trans')
-            ->with('mautic.postmark.plugin.region.invalid', [], 'validators')
-            ->willReturn("Postmark region is invalid. Add 'us' or 'eu' as a suitable region.");
-
-        $dsn = new Dsn(
-            'mautic+postmark+api',
-            'host',
-            null,
-            'postmark_api_key',
-            null,
-            ['region' => 'some_invalid_region']
         );
         $this->postmarkTransportFactory->create($dsn);
     }
