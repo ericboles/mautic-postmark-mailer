@@ -2,8 +2,8 @@
 
 This plugin enable Mautic 5 to run Postmark as an email transport. Features:
 
-- API transport. This transport can send up to 2000 emails per API request which makes it very fast compared to SMTP.
-- Bounce webhook handling. This plugin will unsubscribe contacts in Mautic based on the hard bounces while Postmark will take care of the soft bounce retrieals.
+- API transport.
+- Bounce webhook handling. This plugin will unsubscribe contacts in Mautic based on the hard bounces while Postmark will take care of the soft bounce retries.
 
 #### Mautic Mailer DSN Scheme
 
@@ -11,11 +11,11 @@ This plugin enable Mautic 5 to run Postmark as an email transport. Features:
 
 #### Mautic Mailer DSN Example
 
-`'mailer_dsn' => 'mautic+postmark+api://:<api_key>@default?stream=<stream>',`
+`'mailer_dsn' => 'mautic+postmark+api://:<api_key>@default?messageStream=<messageStream>',`
 
-- api_key: Get Postmark API key from https://app.postmark.com/account/api-keys/create
+- api_key: Get Postmark API key from your postmark server setting
 - options:
-  - stream: the postmark message stream
+  - messageStream: the postmark message stream
 
 <img width="1105" alt="postmark-email-dsn-example" src="Assets/img/postmark-email-dsn-example.png">
 

@@ -39,7 +39,7 @@ class PostmarkTransportFactory extends AbstractTransportFactory
     public function create(Dsn $dsn): TransportInterface
     {
         if (PostmarkTransport::MAUTIC_POSTMARK_API_SCHEME === $dsn->getScheme()) {
-            if (!$region = $dsn->getOption('messageStream')) {
+            if (!$messageStream = $dsn->getOption('messageStream')) {
                 throw new InvalidArgumentException($this->translator->trans('mautic.postmark.plugin.stream.empty', [], 'validators'));
             }
 
@@ -49,7 +49,7 @@ class PostmarkTransportFactory extends AbstractTransportFactory
 
             return new PostmarkTransport(
                 $this->getPassword($dsn),
-                $region,
+                $messageStream,
                 $this->transportCallback,
                 $this->client,
                 $this->dispatcher,
