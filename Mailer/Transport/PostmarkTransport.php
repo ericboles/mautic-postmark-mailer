@@ -69,7 +69,7 @@ class PostmarkTransport extends AbstractApiTransport implements TokenTransportIn
 
     public function __toString(): string
     {
-        return sprintf(self::MAUTIC_POSTMARK_API_SCHEME.'://%s', $this->host).($this->stream ? '?stream='.$this->stream : '');
+        return sprintf(self::MAUTIC_POSTMARK_API_SCHEME.'://%s', $this->host).($this->stream ? '?messageStream='.$this->stream : '');
     }
 
     protected function doSendApi(SentMessage $sentMessage, Email $email, Envelope $envelope): ResponseInterface
@@ -77,7 +77,7 @@ class PostmarkTransport extends AbstractApiTransport implements TokenTransportIn
         $response = $this->client->request('POST', 'https://'.$this->getEndpoint().'/email', [
             'headers' => [
                 'Accept' => 'application/json',
-                'X-Postmark-Server-Token' => $this->key,
+                'X-Postmark-Server-Token' => $this->apiKey,
             ],
             'json' => $this->getPayload($email, $envelope),
         ]);
