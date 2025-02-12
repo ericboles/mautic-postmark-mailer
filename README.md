@@ -23,11 +23,36 @@ This plugin enable Mautic 5 to run Postmark as an email transport. Features:
 
 `'mailer_dsn' => 'mautic+postmark+api://:<api_key>@default?messageStream=<messageStream>',`
 
-- api_key: Get Postmark API key from your postmark server setting
+- api_key: Get Postmark API key from your postmark server setting (`password` in the email configuration ui)
 - options:
   - messageStream: the postmark message stream
 
-<img width="1105" alt="postmark-email-dsn-example" src="Assets/img/postmark-email-dsn-example.png">
+### Installation in Docker containers
+
+The only "easy" way to use a custom plugin in a docker container is to build a custom image. There are a few things I had to find out the hard way, i.e.
+
+- You have to set the right permissions to the plugin folder, otherwise this plugin won't be visible in the configuration ui
+- You need to clear the mautic cache, otherwise - you guessed it - this plugin won't be visible in the configuration ui
+
+This is what I use in my custom docker image
+
+```Dockerfile
+FROM mautic/mautic:5.2.1-apache
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/bin --filename=composer
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+    git \
+    nodejs \
+    npm
+
+# install your symfony transport here
+RUN cd /var/www/html && \
+    COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_PROCESS_TIMEOUT=10000 composer require mariotebest/mautic-postmark-mailer:1.0.1
+
+RUN chmod -R 777 /var/www/html/bin && chown www-data:www-data /var/www/html/docroot/plugins -R
+RUN /var/www/html/bin/console cache:clear
+```
 
 ### Testing
 
