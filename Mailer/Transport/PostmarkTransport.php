@@ -52,7 +52,7 @@ class PostmarkTransport extends AbstractApiTransport implements TokenTransportIn
         'BCC',
     ];
 
-    private ?string $stream = null;
+    private ?string $messageStream = null;
 
     public function __construct(
         private string $apiKey,
@@ -64,12 +64,12 @@ class PostmarkTransport extends AbstractApiTransport implements TokenTransportIn
     ) {
         parent::__construct($client, $dispatcher, $logger);
         $this->host = self::POSTMARK_HOST;
-        $this->stream = $stream;
+        $this->messageStream = $stream;
     }
 
     public function __toString(): string
     {
-        return sprintf(self::MAUTIC_POSTMARK_API_SCHEME.'://%s', $this->host).($this->stream ? '?messageStream='.$this->stream : '');
+        return sprintf(self::MAUTIC_POSTMARK_API_SCHEME.'://%s', $this->host).($this->messageStream ? '?messageStream='.$this->messageStream : '');
     }
 
     protected function doSendApi(SentMessage $sentMessage, Email $email, Envelope $envelope): ResponseInterface
