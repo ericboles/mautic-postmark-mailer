@@ -55,10 +55,10 @@ class CallbackSubscriber implements EventSubscriberInterface
         }
 
         // Check data
-        if (!is_array($this->payload)) {
+        if (!is_array($payload)) {
             $message = 'There is no data to process.';
             $this->logger->error($message . $event->getRequest()->getContent());
-            $this->webhookEvent->setResponse(new Response($message, Response::HTTP_BAD_REQUEST));
+            $event->setResponse(new Response($message, Response::HTTP_BAD_REQUEST));
             return;
         }
 
