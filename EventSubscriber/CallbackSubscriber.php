@@ -18,7 +18,10 @@ class CallbackSubscriber implements EventSubscriberInterface
 {
     public function __construct(
         private TransportCallback $transportCallback,
-        private CoreParametersHelper $coreParametersHelper
+        private CoreParametersHelper $coreParametersHelper,
+        private LoggerInterface $logger,
+        private Client $httpClient,
+        private TranslatorInterface $translator
     ) {
     }
 
@@ -40,7 +43,29 @@ class CallbackSubscriber implements EventSubscriberInterface
             return;
         }
 
-        $payload = $event->getRequest()->request->all();
+        $payload = null;
+        $request = $event->getRequest();
+        $contentType = $request->getContentType();
+        switch ($contentType) {
+            case 'json':
+                $payload = $request->request->all();
+                break;
+            default:
+                $payload = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+                break;
+        }
+
+        // Check data
+        if (!is_array($this->payload)) {
+            $message = 'There is no data to process.';
+            $this->logger->error($message . $event->getRequest()->getContent());
+            $this->webhookEvent->setResponse(new Response($message, Response::HTTP_BAD_REQUEST));
+            return;
+        }
+
+        //$payload = $event->getRequest()->request->all();
+
+        $this->logger->info('Postmark callback received', $payload);
 
         foreach ($payload as $postmarkPayload){
             $messageType = $postmarkPayload['RecordType'] ?? null;
@@ -55,6 +80,8 @@ class CallbackSubscriber implements EventSubscriberInterface
 
             $recipient = $postmarkPayload['Recipient'] ?? null;
 
+            $logger->info('Unsubscribing ' . $recipient . ' because of ' . $reason);
+
             switch($reason){
                 case 'ManualSuppression':
                     $this->transportCallback->addFailureByAddress($recipient, 'unsubscribed', DoNotContact::UNSUBSCRIBED);
@@ -68,10 +95,9 @@ class CallbackSubscriber implements EventSubscriberInterface
                 default:
                     break;
             }
-            $this->transportCallback->processCallbackByEmailAddress($hashId, $rawReason);
         }
 
-        $event->setResponse(new Response('Callback processed'));
+        $event->setResponse(new Response('Postmark Callback processed'));
     }
 
 
