@@ -21,8 +21,6 @@ class CallbackSubscriber implements EventSubscriberInterface
         private TransportCallback $transportCallback,
         private CoreParametersHelper $coreParametersHelper,
         private LoggerInterface $logger,
-        private Client $httpClient,
-        private TranslatorInterface $translator
     ) {
     }
 
