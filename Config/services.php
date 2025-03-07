@@ -10,12 +10,10 @@ return static function (ContainerConfigurator $configurator): void {
     $services = $configurator->services()
         ->defaults()
         ->autowire()
-        ->autoconfigure()
-        ->public();
+        ->autoconfigure();
 
     $services->load('MauticPlugin\\PostmarkBundle\\', '../')
-        //->exclude('../{Config,Helper/PostmarkResponse.php,Mailer/Transport/PostmarkTransport.php}');
-        ->exclude('../{' . implode(',', array_merge(MauticCoreExtension::DEFAULT_EXCLUDES, $excludes)) . '}');
+        ->exclude('../{Config,Helper/PostmarkResponse.php,Mailer/Transport/PostmarkTransport.php}');
 
-    //$services->get(PostmarkTransportFactory::class)->tag('mailer.transport_factory');
+    $services->get(PostmarkTransportFactory::class)->tag('mailer.transport_factory');
 };
