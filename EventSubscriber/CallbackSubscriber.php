@@ -13,6 +13,7 @@ use MauticPlugin\PostmarkBundle\Mailer\Transport\PostmarkTransport;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Mailer\Transport\Dsn;
+use Psr\Log\LoggerInterface;
 
 class CallbackSubscriber implements EventSubscriberInterface
 {
