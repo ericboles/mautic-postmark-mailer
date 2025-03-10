@@ -3,7 +3,7 @@
   "description": "Postmark Mailer Plugin for Mautic",
   "type": "mautic-plugin",
   "license": "GPL-3.0-or-later",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "keywords": [
     "mautic",
     "plugin",
