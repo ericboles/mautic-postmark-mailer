@@ -64,7 +64,6 @@ class CallbackSubscriber implements EventSubscriberInterface
             return;
         }
         
-        error_log("Validating...");
 
         // Check data
         if (!is_array($payload)) {
@@ -79,10 +78,6 @@ class CallbackSubscriber implements EventSubscriberInterface
 
         $messageType = $payload['RecordType'] ?? null;
 
-        error_log('Message type: ' . $messageType);
-
-
-
         if ($messageType !== "SubscriptionChange") {
             $event->setResponse(new Response("This callback only supports 'SubscriptionChange' events", Response::HTTP_BAD_REQUEST));
             return;
@@ -92,10 +87,8 @@ class CallbackSubscriber implements EventSubscriberInterface
         $suppressSending = filter_var($payload['SuppressSending'], FILTER_VALIDATE_BOOLEAN);
         $recipient = $payload['Recipient'] ?? null;
 
-        error_log('SuprressSending: ' . $suppressSending);
 
         if(!$suppressSending){
-            error_log('SuppressSending is false, ignoring');
             $this->logger->info('Removing dnc for recipient ' . $recipient);
             $this->removeFailureByAddress($recipient);
             $event->setResponse(new Response('Postmark Callback processed'));

@@ -16,6 +16,7 @@ This plugin enable Mautic 5 to run Postmark as an email transport. Features:
 
 - API transport.
 - Bounce webhook handling. This plugin will unsubscribe contacts in Mautic based on the hard bounces while Postmark will take care of the soft bounce retries.
+- Supports Re-Subscribes. The DNC flag will be removed when the webhhook sends `SuppressSending: false`
 
 #### Mautic Mailer DSN Scheme
 
