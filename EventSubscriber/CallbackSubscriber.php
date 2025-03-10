@@ -8,7 +8,9 @@ use Mautic\CoreBundle\Helper\CoreParametersHelper;
 use Mautic\EmailBundle\EmailEvents;
 use Mautic\EmailBundle\Event\TransportWebhookEvent;
 use Mautic\EmailBundle\Model\TransportCallback;
-use Mautic\LeadBundle\Entity\DoNotContact;
+use Mautic\EmailBundle\MonitoredEmail\Search\ContactFinder;
+use Mautic\LeadBundle\Entity\DoNotContact as DNC;
+use Mautic\LeadBundle\Model\DoNotContact;
 use MauticPlugin\PostmarkBundle\Mailer\Transport\PostmarkTransport;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Response;
@@ -21,6 +23,8 @@ class CallbackSubscriber implements EventSubscriberInterface
         private TransportCallback $transportCallback,
         private CoreParametersHelper $coreParametersHelper,
         private LoggerInterface $logger,
+        private ContactFinder $finder,
+        private DoNotContact $dncModel
     ) {
     }
 
@@ -45,14 +49,22 @@ class CallbackSubscriber implements EventSubscriberInterface
         $payload = null;
         $request = $event->getRequest();
         $contentType = $request->getContentType();
-        switch ($contentType) {
-            case 'json':
-                $payload = $request->request->all();
-                break;
-            default:
-                $payload = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
-                break;
+        try {
+            switch ($contentType) {
+                case 'json':
+                    $payload = $request->request->all();
+                    break;
+                default:
+                    $payload = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+                    break;
+            }
+        } catch (\Exception $e) {
+            $this->logger->error('JSON decoding error: ' . $e->getMessage());
+            $event->setResponse(new Response('Invalid JSON', Response::HTTP_BAD_REQUEST));
+            return;
         }
+        
+        error_log("Validating...");
 
         // Check data
         if (!is_array($payload)) {
@@ -62,41 +74,63 @@ class CallbackSubscriber implements EventSubscriberInterface
             return;
         }
 
-        //$payload = $event->getRequest()->request->all();
 
-        $this->logger->info('Postmark callback received', $payload);
+        $this->logger->info('Postmark callback received');
 
-        foreach ($payload as $postmarkPayload){
-            $messageType = $postmarkPayload['RecordType'] ?? null;
+        $messageType = $payload['RecordType'] ?? null;
 
-            if ($messageType !== "SubscriptionChange") {
-                continue;
-            }
+        error_log('Message type: ' . $messageType);
 
-            $reason = $postmarkPayload['SuppressionReason'];
-            $suppressSending = filter_var($postmarkPayload['SuppressSending'], FILTER_VALIDATE_BOOLEAN);
-            
 
-            $recipient = $postmarkPayload['Recipient'] ?? null;
 
-            $logger->info('Unsubscribing ' . $recipient . ' because of ' . $reason);
+        if ($messageType !== "SubscriptionChange") {
+            $event->setResponse(new Response("This callback only supports 'SubscriptionChange' events", Response::HTTP_BAD_REQUEST));
+            return;
+        }
 
-            switch($reason){
-                case 'ManualSuppression':
-                    $this->transportCallback->addFailureByAddress($recipient, 'unsubscribed', DoNotContact::UNSUBSCRIBED);
-                    break;
-                case 'HardBounce':
-                    $this->transportCallback->addFailureByAddress($recipient, 'hard_bounce');
-                    break;
-                case 'SpamComplaint':
-                    $this->transportCallback->addFailureByAddress($recipient, 'spam_complaint', DoNotContact::UNSUBSCRIBED);
-                    break;
-                default:
-                    break;
-            }
+        $reason = $payload['SuppressionReason'];
+        $suppressSending = filter_var($payload['SuppressSending'], FILTER_VALIDATE_BOOLEAN);
+        $recipient = $payload['Recipient'] ?? null;
+
+        error_log('SuprressSending: ' . $suppressSending);
+
+        if(!$suppressSending){
+            error_log('SuppressSending is false, ignoring');
+            $this->logger->info('Removing dnc for recipient ' . $recipient);
+            $this->removeFailureByAddress($recipient);
+            $event->setResponse(new Response('Postmark Callback processed'));
+            return;
+        }
+
+        $this->logger->info('Unsubscribing ' . $recipient . ' because of ' . $reason);
+
+        switch($reason) {
+            case 'ManualSuppression':
+                $this->transportCallback->addFailureByAddress($recipient, 'unsubscribed', DNC::UNSUBSCRIBED);
+                break;
+            case 'HardBounce':
+                $this->transportCallback->addFailureByAddress($recipient, 'hard_bounce');
+                break;
+            case 'SpamComplaint':
+                $this->transportCallback->addFailureByAddress($recipient, 'spam_complaint', DNC::UNSUBSCRIBED);
+                break;
+            default:
+                break;
         }
 
         $event->setResponse(new Response('Postmark Callback processed'));
+    }
+
+    private function removeFailureByAddress($address, $channelId = null): void
+    {
+        $result = $this->finder->findByAddress($address);
+
+        if ($contacts = $result->getContacts()) {
+            foreach ($contacts as $contact) {
+                $channel = ($channelId) ? ['email' => $channelId] : 'email';
+                $this->dncModel->removeDncForContact($contact->getId(), $channel);
+            }
+        }
     }
 
 
