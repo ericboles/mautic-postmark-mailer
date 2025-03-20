@@ -53,6 +53,7 @@ class PostmarkTransport extends AbstractTransport
     ];
 
     private ?string $messageStream = null;
+    private ?HttpClientInterface $client = null;
 
     public function __construct(
         private string $apiKey,
@@ -65,6 +66,7 @@ class PostmarkTransport extends AbstractTransport
         parent::__construct($dispatcher, $logger);
         $this->host = self::POSTMARK_HOST;
         $this->messageStream = $stream;
+        $this->client = $client;
     }
 
     public function __toString(): string
