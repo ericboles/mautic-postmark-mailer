@@ -54,6 +54,7 @@ class PostmarkTransport extends AbstractTransport
 
     private ?string $messageStream = null;
     private ?HttpClientInterface $client = null;
+    private LoggerInterface $logger;
 
     public function __construct(
         private string $apiKey,
@@ -67,6 +68,7 @@ class PostmarkTransport extends AbstractTransport
         $this->host = self::POSTMARK_HOST;
         $this->messageStream = $stream;
         $this->client = $client;
+        $this->logger = $logger;
     }
 
     public function __toString(): string
@@ -166,6 +168,11 @@ class PostmarkTransport extends AbstractTransport
         }
 
         return $payload;
+    }
+
+    private function getRecipients(Email $email, Envelope $envelope): array
+    {
+        return array_filter($envelope->getRecipients(), fn (Address $address) => false === \in_array($address, array_merge($email->getCc(), $email->getBcc()), true));
     }
 
     private function getAttachments(Email $email): array
