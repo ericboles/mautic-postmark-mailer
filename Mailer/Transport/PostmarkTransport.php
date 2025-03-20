@@ -6,8 +6,8 @@ namespace MauticPlugin\PostmarkBundle\Mailer\Transport;
 
 use Mautic\EmailBundle\Helper\MailHelper;
 use Mautic\EmailBundle\Mailer\Message\MauticMessage;
-use Mautic\EmailBundle\Mailer\Transport\TokenTransportInterface;
-use Mautic\EmailBundle\Mailer\Transport\TokenTransportTrait;
+// use Mautic\EmailBundle\Mailer\Transport\TokenTransportInterface;
+// use Mautic\EmailBundle\Mailer\Transport\TokenTransportTrait;
 use Mautic\EmailBundle\Model\TransportCallback;
 use Mautic\LeadBundle\Entity\DoNotContact;
 use Psr\EventDispatcher\EventDispatcherInterface;
@@ -20,6 +20,7 @@ use Symfony\Component\Mailer\SentMessage;
 use Symfony\Component\Mailer\Transport\AbstractApiTransport;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
+use Symfony\Component\Mime\MessageConverter;
 use Symfony\Component\Mime\Header\ParameterizedHeader;
 use Symfony\Component\Mime\Header\UnstructuredHeader;
 use Symfony\Contracts\HttpClient\Exception\ClientExceptionInterface;
@@ -29,11 +30,10 @@ use Symfony\Contracts\HttpClient\Exception\ServerExceptionInterface;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
+use Symfony\Component\Mailer\Transport\AbstractTransport;
 
-class PostmarkTransport extends AbstractApiTransport implements TokenTransportInterface
+class PostmarkTransport extends AbstractTransport
 {
-    use TokenTransportTrait;
-
     public const MAUTIC_POSTMARK_API_SCHEME = 'mautic+postmark+api';
 
     public const POSTMARK_HOST = 'api.postmarkapp.com';
@@ -58,11 +58,11 @@ class PostmarkTransport extends AbstractApiTransport implements TokenTransportIn
         private string $apiKey,
         string $stream,
         private TransportCallback $callback,
-        HttpClientInterface $client = null,
-        EventDispatcherInterface $dispatcher = null,
-        LoggerInterface $logger = null
+        ?HttpClientInterface $client = null,
+        ?EventDispatcherInterface $dispatcher = null,
+        ?LoggerInterface $logger = null
     ) {
-        parent::__construct($client, $dispatcher, $logger);
+        parent::__construct($dispatcher, $logger);
         $this->host = self::POSTMARK_HOST;
         $this->messageStream = $stream;
     }
@@ -72,40 +72,81 @@ class PostmarkTransport extends AbstractApiTransport implements TokenTransportIn
         return sprintf(self::MAUTIC_POSTMARK_API_SCHEME.'://%s', $this->host).($this->messageStream ? '?messageStream='.$this->messageStream : '');
     }
 
-    protected function doSendApi(SentMessage $sentMessage, Email $email, Envelope $envelope): ResponseInterface
+    #[\Override]
+    protected function doSend(SentMessage $message): void
     {
-        $response = $this->client->request('POST', 'https://'.$this->getEndpoint().'/email', [
-            'headers' => [
-                'Accept' => 'application/json',
-                'X-Postmark-Server-Token' => $this->apiKey,
-            ],
-            'json' => $this->getPayload($email, $envelope),
-        ]);
-
         try {
+            // error_log("PostmarkTransport::doSend");
+            
+            $envelope = $message->getEnvelope();
+            $email = MessageConverter::toEmail($message->getOriginalMessage());
+
+            $response = $this->client->request('POST', 'https://'.$this->getEndpoint().'/email', [
+                'headers' => [
+                    'Accept' => 'application/json',
+                    'X-Postmark-Server-Token' => $this->apiKey,
+                ],
+                'json' => $this->getPayload($email, $envelope),
+            ]);
+
             $statusCode = $response->getStatusCode();
             $result = $response->toArray(false);
+
+            if (200 !== $statusCode) {
+                // Some delivery issues can be handled silently - route those through EventDispatcher
+                if (null !== $this->dispatcher && self::CODE_INACTIVE_RECIPIENT === $result['ErrorCode']) {
+                    $this->dispatcher->dispatch(new PostmarkDeliveryEvent($result['Message'], $result['ErrorCode'], $email->getHeaders()));
+    
+                    //return $response;
+                    return;
+                }
+    
+                throw new HttpTransportException('Unable to send an email: '.$result['Message'].\sprintf(' (code %d).', $result['ErrorCode']), $response);
+            }
+    
+            $message->setMessageId($result['MessageID']);
+
         } catch (DecodingExceptionInterface) {
             throw new HttpTransportException('Unable to send an email: '.$response->getContent(false).\sprintf(' (code %d).', $statusCode), $response);
         } catch (TransportExceptionInterface $e) {
             throw new HttpTransportException('Could not reach the remote Postmark server.', $response, 0, $e);
-        }
-
-        if (200 !== $statusCode) {
-            // Some delivery issues can be handled silently - route those through EventDispatcher
-            if (null !== $this->dispatcher && self::CODE_INACTIVE_RECIPIENT === $result['ErrorCode']) {
-                $this->dispatcher->dispatch(new PostmarkDeliveryEvent($result['Message'], $result['ErrorCode'], $email->getHeaders()));
-
-                return $response;
-            }
-
-            throw new HttpTransportException('Unable to send an email: '.$result['Message'].\sprintf(' (code %d).', $result['ErrorCode']), $response);
-        }
-
-        $sentMessage->setMessageId($result['MessageID']);
-
-        return $response;
+        } 
     }
+
+    // protected function doSendApi(SentMessage $sentMessage, Email $email, Envelope $envelope): ResponseInterface
+    // {
+    //     $response = $this->client->request('POST', 'https://'.$this->getEndpoint().'/email', [
+    //         'headers' => [
+    //             'Accept' => 'application/json',
+    //             'X-Postmark-Server-Token' => $this->apiKey,
+    //         ],
+    //         'json' => $this->getPayload($email, $envelope),
+    //     ]);
+
+    //     try {
+    //         $statusCode = $response->getStatusCode();
+    //         $result = $response->toArray(false);
+    //     } catch (DecodingExceptionInterface) {
+    //         throw new HttpTransportException('Unable to send an email: '.$response->getContent(false).\sprintf(' (code %d).', $statusCode), $response);
+    //     } catch (TransportExceptionInterface $e) {
+    //         throw new HttpTransportException('Could not reach the remote Postmark server.', $response, 0, $e);
+    //     }
+
+    //     if (200 !== $statusCode) {
+    //         // Some delivery issues can be handled silently - route those through EventDispatcher
+    //         if (null !== $this->dispatcher && self::CODE_INACTIVE_RECIPIENT === $result['ErrorCode']) {
+    //             $this->dispatcher->dispatch(new PostmarkDeliveryEvent($result['Message'], $result['ErrorCode'], $email->getHeaders()));
+
+    //             return $response;
+    //         }
+
+    //         throw new HttpTransportException('Unable to send an email: '.$result['Message'].\sprintf(' (code %d).', $result['ErrorCode']), $response);
+    //     }
+
+    //     $sentMessage->setMessageId($result['MessageID']);
+
+    //     return $response;
+    // }
 
     private function getPayload(Email $email, Envelope $envelope): array
     {
@@ -191,8 +232,8 @@ class PostmarkTransport extends AbstractApiTransport implements TokenTransportIn
         return ($this->host ?: self::HOST);
     }
 
-    public function getMaxBatchLimit(): int
-    {
-        return 500;
-    }
+    // public function getMaxBatchLimit(): int
+    // {
+    //     return 500;
+    // }
 }
