@@ -76,7 +76,6 @@ class PostmarkTransport extends AbstractTransport
     protected function doSend(SentMessage $message): void
     {
         try {
-            // error_log("PostmarkTransport::doSend");
             
             $envelope = $message->getEnvelope();
             $email = MessageConverter::toEmail($message->getOriginalMessage());
@@ -97,7 +96,6 @@ class PostmarkTransport extends AbstractTransport
                 if (null !== $this->dispatcher && self::CODE_INACTIVE_RECIPIENT === $result['ErrorCode']) {
                     $this->dispatcher->dispatch(new PostmarkDeliveryEvent($result['Message'], $result['ErrorCode'], $email->getHeaders()));
     
-                    //return $response;
                     return;
                 }
     
@@ -112,41 +110,6 @@ class PostmarkTransport extends AbstractTransport
             throw new HttpTransportException('Could not reach the remote Postmark server.', $response, 0, $e);
         } 
     }
-
-    // protected function doSendApi(SentMessage $sentMessage, Email $email, Envelope $envelope): ResponseInterface
-    // {
-    //     $response = $this->client->request('POST', 'https://'.$this->getEndpoint().'/email', [
-    //         'headers' => [
-    //             'Accept' => 'application/json',
-    //             'X-Postmark-Server-Token' => $this->apiKey,
-    //         ],
-    //         'json' => $this->getPayload($email, $envelope),
-    //     ]);
-
-    //     try {
-    //         $statusCode = $response->getStatusCode();
-    //         $result = $response->toArray(false);
-    //     } catch (DecodingExceptionInterface) {
-    //         throw new HttpTransportException('Unable to send an email: '.$response->getContent(false).\sprintf(' (code %d).', $statusCode), $response);
-    //     } catch (TransportExceptionInterface $e) {
-    //         throw new HttpTransportException('Could not reach the remote Postmark server.', $response, 0, $e);
-    //     }
-
-    //     if (200 !== $statusCode) {
-    //         // Some delivery issues can be handled silently - route those through EventDispatcher
-    //         if (null !== $this->dispatcher && self::CODE_INACTIVE_RECIPIENT === $result['ErrorCode']) {
-    //             $this->dispatcher->dispatch(new PostmarkDeliveryEvent($result['Message'], $result['ErrorCode'], $email->getHeaders()));
-
-    //             return $response;
-    //         }
-
-    //         throw new HttpTransportException('Unable to send an email: '.$result['Message'].\sprintf(' (code %d).', $result['ErrorCode']), $response);
-    //     }
-
-    //     $sentMessage->setMessageId($result['MessageID']);
-
-    //     return $response;
-    // }
 
     private function getPayload(Email $email, Envelope $envelope): array
     {
