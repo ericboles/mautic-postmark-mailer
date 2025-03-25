@@ -23,6 +23,7 @@ use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\MessageConverter;
 use Symfony\Component\Mime\Header\ParameterizedHeader;
 use Symfony\Component\Mime\Header\UnstructuredHeader;
+use Symfony\Component\Mailer\Header\TagHeader;
 use Symfony\Contracts\HttpClient\Exception\ClientExceptionInterface;
 use Symfony\Contracts\HttpClient\Exception\DecodingExceptionInterface;
 use Symfony\Contracts\HttpClient\Exception\RedirectionExceptionInterface;
