@@ -12,11 +12,17 @@ Although, if you want to thank me and want to keep seeing me struggle with PHP a
 
 ### Mautic Postmark Plugin
 
-This plugin enable Mautic 5 to run Postmark as an email transport. Features:
+This plugin enable Mautic 5.x to run Postmark as an email transport. Features:
 
 - API transport.
 - Bounce webhook handling. This plugin will unsubscribe contacts in Mautic based on the hard bounces while Postmark will take care of the soft bounce retries.
 - Supports Re-Subscribes. The DNC flag will be removed when the webhhook sends `SuppressSending: false`
+
+Be aware that there is a existing symfony postmark bridge, but no recent version is compatible with Mautic 5 and has a webhook support.
+
+### Using a different Message Stream for Transactional and Broadcast Messages
+
+You can you different message streams on a per-email basis. You just have to add the `X-PM-Message-Stream` custom header with the value of your message stream to the mautic email.
 
 #### Mautic Mailer DSN Scheme
 
@@ -30,6 +36,8 @@ This plugin enable Mautic 5 to run Postmark as an email transport. Features:
 - options:
   - messageStream: the postmark message stream
 
+<img width="1105" alt="configuration-example" src="Assets/img/configuration-example.png">
+
 ### Installation in Docker containers
 
 The only "easy" way to use a custom plugin in a docker container is to build a custom image. There are a few things I had to find out the hard way, i.e.
@@ -40,7 +48,8 @@ The only "easy" way to use a custom plugin in a docker container is to build a c
 This is what I use in my custom docker image
 
 ```Dockerfile
-FROM mautic/mautic:5.2.1-apache
+FROM mautic/mautic:5.2.3-apache
+
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/bin --filename=composer
 
 RUN apt-get update \
@@ -49,12 +58,18 @@ RUN apt-get update \
     nodejs \
     npm
 
-# install your symfony transport here
-RUN cd /var/www/html && \
-    COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_PROCESS_TIMEOUT=10000 composer require mariotebest/mautic-postmark-mailer:1.0.1
 
-RUN chmod -R 777 /var/www/html/bin && chown www-data:www-data /var/www/html/docroot/plugins -R
-RUN /var/www/html/bin/console cache:clear
+RUN chown www-data:www-data /var/www/html -R && \
+    chown www-data:www-data /tmp -R
+
+RUN chown www-data:www-data /var/www
+
+
+RUN su -s /bin/bash www-data -c "composer require -vvv --working-dir=/var/www/html/ mariotebest/mautic-postmark-mailer:1.0.13"
+
+# run cache clear as www-data otherwise the permissions will be messed up
+RUN su -s /bin/bash www-data -c "php /var/www/html/bin/console cache:clear"
+
 ```
 
 ### Testing
