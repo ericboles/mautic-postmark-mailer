@@ -24,6 +24,7 @@ use Symfony\Component\Mime\MessageConverter;
 use Symfony\Component\Mime\Header\ParameterizedHeader;
 use Symfony\Component\Mime\Header\UnstructuredHeader;
 use Symfony\Component\Mailer\Header\TagHeader;
+use MauticPlugin\PostmarkBundle\Mailer\Transport\MessageStreamHeader;
 use Symfony\Contracts\HttpClient\Exception\ClientExceptionInterface;
 use Symfony\Contracts\HttpClient\Exception\DecodingExceptionInterface;
 use Symfony\Contracts\HttpClient\Exception\RedirectionExceptionInterface;
@@ -38,6 +39,8 @@ class PostmarkTransport extends AbstractTransport
     public const MAUTIC_POSTMARK_API_SCHEME = 'mautic+postmark+api';
 
     public const POSTMARK_HOST = 'api.postmarkapp.com';
+
+    private const CODE_INACTIVE_RECIPIENT = 300;
 
     private const STD_HEADER_KEYS = [
         'MIME-Version',
@@ -97,10 +100,16 @@ class PostmarkTransport extends AbstractTransport
             $result = $response->toArray(false);
 
             if (200 !== $statusCode) {
-                // Some delivery issues can be handled silently - route those through EventDispatcher
-                if (null !== $this->dispatcher && self::CODE_INACTIVE_RECIPIENT === $result['ErrorCode']) {
-                    $this->dispatcher->dispatch(new PostmarkDeliveryEvent($result['Message'], $result['ErrorCode'], $email->getHeaders()));
-    
+                // For inactive recipients, let the webhook callback system handle bounce processing
+                if (self::CODE_INACTIVE_RECIPIENT === $result['ErrorCode']) {
+                    // Log the inactive recipient but don't throw exception
+                    // The webhook system will handle adding to DNC list
+                    if ($this->logger) {
+                        $this->logger->info('Inactive recipient detected, webhook will handle bounce processing', [
+                            'error_code' => $result['ErrorCode'],
+                            'message' => $result['Message']
+                        ]);
+                    }
                     return;
                 }
     
@@ -130,6 +139,9 @@ class PostmarkTransport extends AbstractTransport
             'Attachments' => $this->getAttachments($email),
         ];
 
+        // Add Mautic tracking information to metadata for better webhook processing
+        $this->addMauticTrackingMetadata($payload, $email);
+
         $headersToBypass = ['from', 'to', 'cc', 'bcc', 'subject', 'content-type', 'sender', 'reply-to'];
         foreach ($email->getHeaders()->all() as $name => $header) {
             if (\in_array($name, $headersToBypass, true)) {
@@ -146,8 +158,9 @@ class PostmarkTransport extends AbstractTransport
                 continue;
             }
 
-            if ($header instanceof MetadataHeader) {
-                $payload['Metadata'][$header->getKey()] = $header->getValue();
+            if (str_starts_with($name, 'X-PM-Metadata-')) {
+                $metadataKey = substr($name, 14); // Remove 'X-PM-Metadata-' prefix
+                $payload['Metadata'][$metadataKey] = $header->getBodyAsString();
 
                 continue;
             }
@@ -202,7 +215,38 @@ class PostmarkTransport extends AbstractTransport
 
     private function getEndpoint(): ?string
     {
-        return ($this->host ?: self::HOST);
+        return ($this->host ?: self::POSTMARK_HOST);
+    }
+
+    /**
+     * Add Mautic-specific tracking metadata to Postmark payload
+     */
+    private function addMauticTrackingMetadata(array &$payload, Email $email): void
+    {
+        // Extract Mautic tracking information from email headers
+        $mauticHeaders = [];
+        foreach ($email->getHeaders()->all() as $name => $header) {
+            if (str_starts_with($name, 'X-Mautic-') || str_starts_with($name, 'X-Email-')) {
+                $mauticHeaders[$name] = $header->getBodyAsString();
+            }
+        }
+
+        // Add Mautic tracking data to Postmark metadata
+        if (!empty($mauticHeaders)) {
+            if (!isset($payload['Metadata'])) {
+                $payload['Metadata'] = [];
+            }
+
+            // Add relevant Mautic tracking info
+            foreach ($mauticHeaders as $headerName => $headerValue) {
+                $metadataKey = str_replace(['X-Mautic-', 'X-Email-'], '', $headerName);
+                $payload['Metadata']['mautic_' . strtolower($metadataKey)] = $headerValue;
+            }
+
+            $this->logger?->debug('Added Mautic tracking metadata to Postmark', [
+                'metadata' => $payload['Metadata']
+            ]);
+        }
     }
 
     // public function getMaxBatchLimit(): int

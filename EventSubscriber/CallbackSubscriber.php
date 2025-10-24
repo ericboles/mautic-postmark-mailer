@@ -9,6 +9,7 @@ use Mautic\EmailBundle\EmailEvents;
 use Mautic\EmailBundle\Event\TransportWebhookEvent;
 use Mautic\EmailBundle\Model\TransportCallback;
 use Mautic\EmailBundle\MonitoredEmail\Search\ContactFinder;
+use Mautic\EmailBundle\Entity\Stat;
 use Mautic\LeadBundle\Entity\DoNotContact as DNC;
 use Mautic\LeadBundle\Model\DoNotContact;
 use MauticPlugin\PostmarkBundle\Mailer\Transport\PostmarkTransport;
@@ -16,6 +17,7 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Mailer\Transport\Dsn;
 use Psr\Log\LoggerInterface;
+use Doctrine\ORM\EntityManagerInterface;
 
 class CallbackSubscriber implements EventSubscriberInterface
 {
@@ -24,7 +26,8 @@ class CallbackSubscriber implements EventSubscriberInterface
         private CoreParametersHelper $coreParametersHelper,
         private LoggerInterface $logger,
         private ContactFinder $finder,
-        private DoNotContact $dncModel
+        private DoNotContact $dncModel,
+        private EntityManagerInterface $entityManager
     ) {
     }
 
@@ -95,19 +98,49 @@ class CallbackSubscriber implements EventSubscriberInterface
             return;
         }
 
-        $this->logger->info('Unsubscribing ' . $recipient . ' because of ' . $reason);
+        $this->logger->info('Processing suppression for ' . $recipient . ' because of ' . $reason);
+
+        // Extract additional tracking data from webhook
+        $messageId = $payload['MessageID'] ?? null;
+        $tag = $payload['Tag'] ?? null;
+        $metadata = $payload['Metadata'] ?? [];
+        $messageStream = $payload['MessageStream'] ?? null;
+
+        // Log additional context for debugging
+        $this->logger->info('Webhook context', [
+            'messageId' => $messageId,
+            'tag' => $tag,
+            'messageStream' => $messageStream,
+            'metadata' => $metadata
+        ]);
+
+        // Try to find specific email stat by MessageID for more detailed tracking
+        $emailStat = null;
+        if ($messageId) {
+            $emailStat = $this->findEmailStatByMessageId($messageId, $recipient);
+        }
 
         switch($reason) {
             case 'ManualSuppression':
                 $this->transportCallback->addFailureByAddress($recipient, 'unsubscribed', DNC::UNSUBSCRIBED);
+                if ($emailStat) {
+                    $this->addBounceToEmailStat($emailStat, 'unsubscribed', $reason);
+                }
                 break;
             case 'HardBounce':
                 $this->transportCallback->addFailureByAddress($recipient, 'hard_bounce');
+                if ($emailStat) {
+                    $this->addBounceToEmailStat($emailStat, 'hard_bounce', $reason);
+                }
                 break;
             case 'SpamComplaint':
                 $this->transportCallback->addFailureByAddress($recipient, 'spam_complaint', DNC::UNSUBSCRIBED);
+                if ($emailStat) {
+                    $this->addBounceToEmailStat($emailStat, 'spam_complaint', $reason);
+                }
                 break;
             default:
+                $this->logger->warning('Unknown suppression reason: ' . $reason);
                 break;
         }
 
@@ -126,5 +159,89 @@ class CallbackSubscriber implements EventSubscriberInterface
         }
     }
 
+    /**
+     * Find email stat by Postmark MessageID and recipient email
+     */
+    private function findEmailStatByMessageId(string $messageId, string $recipient): ?Stat
+    {
+        try {
+            $repository = $this->entityManager->getRepository(Stat::class);
+            
+            // Try to find by MessageID (stored as tracking hash or in email details)
+            $stat = $repository->createQueryBuilder('s')
+                ->where('s.trackingHash = :messageId')
+                ->orWhere('s.emailAddress = :recipient AND s.openDetails LIKE :messageIdPattern')
+                ->setParameter('messageId', $messageId)
+                ->setParameter('recipient', $recipient)
+                ->setParameter('messageIdPattern', '%' . $messageId . '%')
+                ->orderBy('s.dateSent', 'DESC')
+                ->setMaxResults(1)
+                ->getQuery()
+                ->getOneOrNullResult();
 
+            if ($stat) {
+                $this->logger->info('Found email stat for MessageID', [
+                    'messageId' => $messageId,
+                    'recipient' => $recipient,
+                    'statId' => $stat->getId()
+                ]);
+            } else {
+                $this->logger->warning('No email stat found for MessageID', [
+                    'messageId' => $messageId,
+                    'recipient' => $recipient
+                ]);
+            }
+
+            return $stat;
+        } catch (\Exception $e) {
+            $this->logger->error('Error finding email stat by MessageID', [
+                'messageId' => $messageId,
+                'recipient' => $recipient,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Add bounce information to specific email stat
+     */
+    private function addBounceToEmailStat(Stat $emailStat, string $bounceType, string $reason): void
+    {
+        try {
+            $openDetails = $emailStat->getOpenDetails() ?: [];
+            
+            // Add bounce information
+            if (!isset($openDetails['bounces'])) {
+                $openDetails['bounces'] = [];
+            }
+
+            $bounceData = [
+                'datetime' => (new \DateTime())->format('Y-m-d H:i:s'),
+                'type' => $bounceType,
+                'reason' => $reason,
+                'source' => 'postmark_webhook'
+            ];
+
+            $openDetails['bounces'][] = $bounceData;
+            
+            // Update the email stat
+            $emailStat->setOpenDetails($openDetails);
+            $this->entityManager->persist($emailStat);
+            $this->entityManager->flush();
+
+            $this->logger->info('Added bounce to email stat', [
+                'statId' => $emailStat->getId(),
+                'bounceType' => $bounceType,
+                'reason' => $reason
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error adding bounce to email stat', [
+                'statId' => $emailStat->getId(),
+                'bounceType' => $bounceType,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
 }
