@@ -122,21 +122,24 @@ class CallbackSubscriber implements EventSubscriberInterface
 
         switch($reason) {
             case 'ManualSuppression':
+                // Contact manually unsubscribed - add to DNC and update email stat
                 $this->transportCallback->addFailureByAddress($recipient, 'unsubscribed', DNC::UNSUBSCRIBED);
                 if ($emailStat) {
-                    $this->addBounceToEmailStat($emailStat, 'unsubscribed', $reason);
+                    $this->updateEmailStatForUnsubscribe($emailStat, $reason);
                 }
                 break;
             case 'HardBounce':
+                // Email bounced - add to DNC and mark email as bounced for campaign stats
                 $this->transportCallback->addFailureByAddress($recipient, 'hard_bounce');
                 if ($emailStat) {
                     $this->addBounceToEmailStat($emailStat, 'hard_bounce', $reason);
                 }
                 break;
             case 'SpamComplaint':
+                // Marked as spam - unsubscribe and update email stat
                 $this->transportCallback->addFailureByAddress($recipient, 'spam_complaint', DNC::UNSUBSCRIBED);
                 if ($emailStat) {
-                    $this->addBounceToEmailStat($emailStat, 'spam_complaint', $reason);
+                    $this->updateEmailStatForUnsubscribe($emailStat, $reason);
                 }
                 break;
             default:
@@ -204,42 +207,115 @@ class CallbackSubscriber implements EventSubscriberInterface
     }
 
     /**
-     * Add bounce information to specific email stat
+     * Add bounce information to specific email stat and update status for campaign reporting
      */
     private function addBounceToEmailStat(Stat $emailStat, string $bounceType, string $reason): void
     {
         try {
+            $now = new \DateTime();
+            
+            // Update the stat status fields that Mautic uses for campaign reporting
+            if ($bounceType === 'hard_bounce') {
+                // Mark as bounced for campaign bounce percentage calculations
+                $emailStat->setIsBounced(true);
+                if (!$emailStat->getDateRead()) {
+                    $emailStat->setDateRead($now);
+                    $emailStat->setIsRead(true);
+                }
+            } elseif (in_array($bounceType, ['unsubscribed', 'spam_complaint'])) {
+                // Mark as read for unsubscribe tracking (so it's counted in campaign stats)
+                if (!$emailStat->getDateRead()) {
+                    $emailStat->setDateRead($now);
+                    $emailStat->setIsRead(true);
+                }
+                // Note: Mautic tracks unsubscribes separately in the DoNotContact table
+                // which we already handle via transportCallback->addFailureByAddress()
+            }
+
+            // Add detailed bounce information to openDetails for audit trail
             $openDetails = $emailStat->getOpenDetails() ?: [];
             
-            // Add bounce information
             if (!isset($openDetails['bounces'])) {
                 $openDetails['bounces'] = [];
             }
 
             $bounceData = [
-                'datetime' => (new \DateTime())->format('Y-m-d H:i:s'),
+                'datetime' => $now->format('Y-m-d H:i:s'),
                 'type' => $bounceType,
                 'reason' => $reason,
                 'source' => 'postmark_webhook'
             ];
 
             $openDetails['bounces'][] = $bounceData;
-            
-            // Update the email stat
             $emailStat->setOpenDetails($openDetails);
+            
+            // Save changes
             $this->entityManager->persist($emailStat);
             $this->entityManager->flush();
 
-            $this->logger->info('Added bounce to email stat', [
+            $this->logger->info('Updated email stat for campaign reporting', [
                 'statId' => $emailStat->getId(),
                 'bounceType' => $bounceType,
-                'reason' => $reason
+                'reason' => $reason,
+                'isBounced' => $emailStat->getIsBounced(),
+                'isRead' => $emailStat->getIsRead(),
+                'dateRead' => $emailStat->getDateRead()?->format('Y-m-d H:i:s')
             ]);
 
         } catch (\Exception $e) {
-            $this->logger->error('Error adding bounce to email stat', [
+            $this->logger->error('Error updating email stat for campaign reporting', [
                 'statId' => $emailStat->getId(),
                 'bounceType' => $bounceType,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Update email stat for unsubscribe events (manual suppression or spam complaints)
+     */
+    private function updateEmailStatForUnsubscribe(Stat $emailStat, string $reason): void
+    {
+        try {
+            $now = new \DateTime();
+            
+            // Mark as read so the email is counted in campaign statistics
+            if (!$emailStat->getDateRead()) {
+                $emailStat->setDateRead($now);
+                $emailStat->setIsRead(true);
+            }
+
+            // Add unsubscribe details to openDetails
+            $openDetails = $emailStat->getOpenDetails() ?: [];
+            
+            if (!isset($openDetails['unsubscribes'])) {
+                $openDetails['unsubscribes'] = [];
+            }
+
+            $unsubscribeData = [
+                'datetime' => $now->format('Y-m-d H:i:s'),
+                'reason' => $reason,
+                'source' => 'postmark_webhook'
+            ];
+
+            $openDetails['unsubscribes'][] = $unsubscribeData;
+            $emailStat->setOpenDetails($openDetails);
+            
+            // Save changes
+            $this->entityManager->persist($emailStat);
+            $this->entityManager->flush();
+
+            $this->logger->info('Updated email stat for unsubscribe', [
+                'statId' => $emailStat->getId(),
+                'reason' => $reason,
+                'isRead' => $emailStat->getIsRead(),
+                'dateRead' => $emailStat->getDateRead()?->format('Y-m-d H:i:s')
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error updating email stat for unsubscribe', [
+                'statId' => $emailStat->getId(),
+                'reason' => $reason,
                 'error' => $e->getMessage()
             ]);
         }
