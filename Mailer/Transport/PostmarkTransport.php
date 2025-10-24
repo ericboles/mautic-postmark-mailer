@@ -152,7 +152,7 @@ class PostmarkTransport extends AbstractTransport
                 continue;
             }
 
-            if ($header instanceof MessageStreamHeader || strcasecmp($name, 'X-PM-Message-Stream', $name) === 0) {
+            if ($header instanceof MessageStreamHeader || strcasecmp($name, 'X-PM-Message-Stream') === 0) {
                 $payload['MessageStream'] = $header->getValue();
 
                 continue;
