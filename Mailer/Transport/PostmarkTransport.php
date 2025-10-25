@@ -40,7 +40,8 @@ class PostmarkTransport extends AbstractTransport
 
     public const POSTMARK_HOST = 'api.postmarkapp.com';
 
-    private const CODE_INACTIVE_RECIPIENT = 300;
+    // Postmark API Error Codes
+    private const CODE_INACTIVE_RECIPIENT = 406;  // Recipient on suppression list
 
     private const STD_HEADER_KEYS = [
         'MIME-Version',
@@ -100,16 +101,41 @@ class PostmarkTransport extends AbstractTransport
             $result = $response->toArray(false);
 
             if (200 !== $statusCode) {
-                // For inactive recipients, let the webhook callback system handle bounce processing
+                // Handle suppressed recipients (on Postmark suppression list)
                 if (self::CODE_INACTIVE_RECIPIENT === $result['ErrorCode']) {
-                    // Log the inactive recipient but don't throw exception
-                    // The webhook system will handle adding to DNC list
-                    if ($this->logger) {
-                        $this->logger->info('Inactive recipient detected, webhook will handle bounce processing', [
-                            'error_code' => $result['ErrorCode'],
-                            'message' => $result['Message']
-                        ]);
+                    // Get recipient email address
+                    $recipients = $envelope->getRecipients();
+                    $recipientEmail = !empty($recipients) ? $recipients[0]->getAddress() : 'unknown';
+                    
+                    // Extract email ID for proper stat tracking
+                    $emailId = null;
+                    foreach ($email->getHeaders()->all() as $name => $header) {
+                        if (strtoupper($name) === 'X-EMAIL-ID') {
+                            $emailId = (int) $header->getBodyAsString();
+                            break;
+                        }
                     }
+                    
+                    // Re-sync to Mautic DNC - Postmark suppression list is source of truth
+                    // The 4th parameter (emailId) ensures campaign stats are updated
+                    $this->callback->addFailureByAddress(
+                        $recipientEmail,
+                        'Postmark Suppression: ' . ($result['Message'] ?? 'Recipient on suppression list'),
+                        DoNotContact::BOUNCED,
+                        $emailId
+                    );
+                    
+                    // Log the sync action for admin awareness
+                    $this->logger->warning('Contact reactivated in Mautic but suppressed in Postmark - re-synced to DNC', [
+                        'recipient' => $recipientEmail,
+                        'email_id' => $emailId,
+                        'postmark_error' => $result['Message'] ?? 'Unknown',
+                        'postmark_error_code' => $result['ErrorCode'],
+                        'action' => 'Re-added to Mautic DNC list',
+                        'note' => 'Remove from Postmark suppression list if reactivation was intentional'
+                    ]);
+                    
+                    // Return without throwing exception - allows other emails to continue
                     return;
                 }
     
