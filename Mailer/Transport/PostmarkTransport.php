@@ -250,9 +250,8 @@ class PostmarkTransport extends AbstractTransport
      */
     private function addMauticTrackingMetadata(array &$payload, Email $email): void
     {
-        if (!isset($payload['Metadata'])) {
-            $payload['Metadata'] = [];
-        }
+        // Initialize metadata array to collect data
+        $metadata = [];
 
         // Extract Mautic tracking information from email headers
         $mauticHeaders = [];
@@ -261,7 +260,7 @@ class PostmarkTransport extends AbstractTransport
             
             // Special handling for X-EMAIL-ID - this is critical for campaign stats!
             if (strtoupper($name) === 'X-EMAIL-ID') {
-                $payload['Metadata']['email_id'] = $headerValue;
+                $metadata['email_id'] = $headerValue;
                 $this->logger?->info('Added email_id to Postmark metadata', [
                     'email_id' => $headerValue
                 ]);
@@ -273,17 +272,23 @@ class PostmarkTransport extends AbstractTransport
             }
         }
 
-        // Add other Mautic tracking data to Postmark metadata
+        // Add other Mautic tracking data to metadata
         if (!empty($mauticHeaders)) {
             // Add relevant Mautic tracking info
             foreach ($mauticHeaders as $headerName => $headerValue) {
                 $metadataKey = str_replace(['X-Mautic-', 'X-Email-', 'X-'], '', $headerName);
-                $payload['Metadata']['mautic_' . strtolower($metadataKey)] = $headerValue;
+                $metadata['mautic_' . strtolower($metadataKey)] = $headerValue;
             }
 
             $this->logger?->debug('Added Mautic tracking metadata to Postmark', [
-                'metadata' => $payload['Metadata']
+                'metadata' => $metadata
             ]);
+        }
+
+        // Only add Metadata to payload if we have actual data
+        // Postmark API rejects empty Metadata objects (error 403)
+        if (!empty($metadata)) {
+            $payload['Metadata'] = $metadata;
         }
     }
 
