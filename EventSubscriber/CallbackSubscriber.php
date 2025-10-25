@@ -9,7 +9,6 @@ use Mautic\EmailBundle\EmailEvents;
 use Mautic\EmailBundle\Event\TransportWebhookEvent;
 use Mautic\EmailBundle\Model\TransportCallback;
 use Mautic\EmailBundle\MonitoredEmail\Search\ContactFinder;
-use Mautic\EmailBundle\Entity\Stat;
 use Mautic\LeadBundle\Entity\DoNotContact as DNC;
 use Mautic\LeadBundle\Model\DoNotContact;
 use MauticPlugin\PostmarkBundle\Mailer\Transport\PostmarkTransport;
@@ -17,7 +16,6 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Mailer\Transport\Dsn;
 use Psr\Log\LoggerInterface;
-use Doctrine\ORM\EntityManagerInterface;
 
 class CallbackSubscriber implements EventSubscriberInterface
 {
@@ -26,8 +24,7 @@ class CallbackSubscriber implements EventSubscriberInterface
         private CoreParametersHelper $coreParametersHelper,
         private LoggerInterface $logger,
         private ContactFinder $finder,
-        private DoNotContact $dncModel,
-        private EntityManagerInterface $entityManager
+        private DoNotContact $dncModel
     ) {
     }
 
@@ -106,41 +103,56 @@ class CallbackSubscriber implements EventSubscriberInterface
         $metadata = $payload['Metadata'] ?? [];
         $messageStream = $payload['MessageStream'] ?? null;
 
+        // Extract email ID from metadata - this is critical for campaign statistics!
+        $emailId = null;
+        if (!empty($metadata)) {
+            // Check for email_id in metadata (sent by PostmarkTransport)
+            $emailId = $metadata['email_id'] ?? $metadata['mautic_email_id'] ?? null;
+            
+            // Convert to integer if it's a string
+            if ($emailId !== null) {
+                $emailId = (int) $emailId;
+            }
+        }
+
         // Log additional context for debugging
         $this->logger->info('Webhook context', [
             'messageId' => $messageId,
             'tag' => $tag,
             'messageStream' => $messageStream,
-            'metadata' => $metadata
+            'metadata' => $metadata,
+            'emailId' => $emailId
         ]);
 
-        // Try to find specific email stat by MessageID for more detailed tracking
-        $emailStat = null;
-        if ($messageId) {
-            $emailStat = $this->findEmailStatByMessageId($messageId, $recipient);
-        }
-
+        // Process the suppression using TransportCallback
+        // The 4th parameter (emailId) is CRITICAL - it enables campaign statistics!
         switch($reason) {
             case 'ManualSuppression':
-                // Contact manually unsubscribed - add to DNC and update email stat
-                $this->transportCallback->addFailureByAddress($recipient, 'unsubscribed', DNC::UNSUBSCRIBED);
-                if ($emailStat) {
-                    $this->updateEmailStatForUnsubscribe($emailStat, $reason);
-                }
+                // Contact manually unsubscribed
+                $this->transportCallback->addFailureByAddress(
+                    $recipient, 
+                    'unsubscribed', 
+                    DNC::UNSUBSCRIBED,
+                    $emailId  // ← This enables campaign statistics!
+                );
                 break;
             case 'HardBounce':
-                // Email bounced - add to DNC and mark email as bounced for campaign stats
-                $this->transportCallback->addFailureByAddress($recipient, 'hard_bounce');
-                if ($emailStat) {
-                    $this->addBounceToEmailStat($emailStat, 'hard_bounce', $reason);
-                }
+                // Email bounced - this will set isFailed=true on the Stat record
+                $this->transportCallback->addFailureByAddress(
+                    $recipient, 
+                    'hard_bounce',
+                    DNC::BOUNCED,
+                    $emailId  // ← This enables campaign statistics!
+                );
                 break;
             case 'SpamComplaint':
-                // Marked as spam - unsubscribe and update email stat
-                $this->transportCallback->addFailureByAddress($recipient, 'spam_complaint', DNC::UNSUBSCRIBED);
-                if ($emailStat) {
-                    $this->updateEmailStatForUnsubscribe($emailStat, $reason);
-                }
+                // Marked as spam
+                $this->transportCallback->addFailureByAddress(
+                    $recipient, 
+                    'spam_complaint',
+                    DNC::UNSUBSCRIBED,
+                    $emailId  // ← This enables campaign statistics!
+                );
                 break;
             default:
                 $this->logger->warning('Unknown suppression reason: ' . $reason);
@@ -159,165 +171,6 @@ class CallbackSubscriber implements EventSubscriberInterface
                 $channel = ($channelId) ? ['email' => $channelId] : 'email';
                 $this->dncModel->removeDncForContact($contact->getId(), $channel);
             }
-        }
-    }
-
-    /**
-     * Find email stat by Postmark MessageID and recipient email
-     */
-    private function findEmailStatByMessageId(string $messageId, string $recipient): ?Stat
-    {
-        try {
-            $repository = $this->entityManager->getRepository(Stat::class);
-            
-            // Try to find by MessageID (stored as tracking hash or in email details)
-            $stat = $repository->createQueryBuilder('s')
-                ->where('s.trackingHash = :messageId')
-                ->orWhere('s.emailAddress = :recipient AND s.openDetails LIKE :messageIdPattern')
-                ->setParameter('messageId', $messageId)
-                ->setParameter('recipient', $recipient)
-                ->setParameter('messageIdPattern', '%' . $messageId . '%')
-                ->orderBy('s.dateSent', 'DESC')
-                ->setMaxResults(1)
-                ->getQuery()
-                ->getOneOrNullResult();
-
-            if ($stat) {
-                $this->logger->info('Found email stat for MessageID', [
-                    'messageId' => $messageId,
-                    'recipient' => $recipient,
-                    'statId' => $stat->getId()
-                ]);
-            } else {
-                $this->logger->warning('No email stat found for MessageID', [
-                    'messageId' => $messageId,
-                    'recipient' => $recipient
-                ]);
-            }
-
-            return $stat;
-        } catch (\Exception $e) {
-            $this->logger->error('Error finding email stat by MessageID', [
-                'messageId' => $messageId,
-                'recipient' => $recipient,
-                'error' => $e->getMessage()
-            ]);
-            return null;
-        }
-    }
-
-    /**
-     * Add bounce information to specific email stat and update status for campaign reporting
-     */
-    private function addBounceToEmailStat(Stat $emailStat, string $bounceType, string $reason): void
-    {
-        try {
-            $now = new \DateTime();
-            
-            // Update the stat status fields that Mautic uses for campaign reporting
-            if ($bounceType === 'hard_bounce') {
-                // Mark as bounced for campaign bounce percentage calculations
-                $emailStat->setIsBounced(true);
-                if (!$emailStat->getDateRead()) {
-                    $emailStat->setDateRead($now);
-                    $emailStat->setIsRead(true);
-                }
-            } elseif (in_array($bounceType, ['unsubscribed', 'spam_complaint'])) {
-                // Mark as read for unsubscribe tracking (so it's counted in campaign stats)
-                if (!$emailStat->getDateRead()) {
-                    $emailStat->setDateRead($now);
-                    $emailStat->setIsRead(true);
-                }
-                // Note: Mautic tracks unsubscribes separately in the DoNotContact table
-                // which we already handle via transportCallback->addFailureByAddress()
-            }
-
-            // Add detailed bounce information to openDetails for audit trail
-            $openDetails = $emailStat->getOpenDetails() ?: [];
-            
-            if (!isset($openDetails['bounces'])) {
-                $openDetails['bounces'] = [];
-            }
-
-            $bounceData = [
-                'datetime' => $now->format('Y-m-d H:i:s'),
-                'type' => $bounceType,
-                'reason' => $reason,
-                'source' => 'postmark_webhook'
-            ];
-
-            $openDetails['bounces'][] = $bounceData;
-            $emailStat->setOpenDetails($openDetails);
-            
-            // Save changes
-            $this->entityManager->persist($emailStat);
-            $this->entityManager->flush();
-
-            $this->logger->info('Updated email stat for campaign reporting', [
-                'statId' => $emailStat->getId(),
-                'bounceType' => $bounceType,
-                'reason' => $reason,
-                'isBounced' => $emailStat->getIsBounced(),
-                'isRead' => $emailStat->getIsRead(),
-                'dateRead' => $emailStat->getDateRead()?->format('Y-m-d H:i:s')
-            ]);
-
-        } catch (\Exception $e) {
-            $this->logger->error('Error updating email stat for campaign reporting', [
-                'statId' => $emailStat->getId(),
-                'bounceType' => $bounceType,
-                'error' => $e->getMessage()
-            ]);
-        }
-    }
-
-    /**
-     * Update email stat for unsubscribe events (manual suppression or spam complaints)
-     */
-    private function updateEmailStatForUnsubscribe(Stat $emailStat, string $reason): void
-    {
-        try {
-            $now = new \DateTime();
-            
-            // Mark as read so the email is counted in campaign statistics
-            if (!$emailStat->getDateRead()) {
-                $emailStat->setDateRead($now);
-                $emailStat->setIsRead(true);
-            }
-
-            // Add unsubscribe details to openDetails
-            $openDetails = $emailStat->getOpenDetails() ?: [];
-            
-            if (!isset($openDetails['unsubscribes'])) {
-                $openDetails['unsubscribes'] = [];
-            }
-
-            $unsubscribeData = [
-                'datetime' => $now->format('Y-m-d H:i:s'),
-                'reason' => $reason,
-                'source' => 'postmark_webhook'
-            ];
-
-            $openDetails['unsubscribes'][] = $unsubscribeData;
-            $emailStat->setOpenDetails($openDetails);
-            
-            // Save changes
-            $this->entityManager->persist($emailStat);
-            $this->entityManager->flush();
-
-            $this->logger->info('Updated email stat for unsubscribe', [
-                'statId' => $emailStat->getId(),
-                'reason' => $reason,
-                'isRead' => $emailStat->getIsRead(),
-                'dateRead' => $emailStat->getDateRead()?->format('Y-m-d H:i:s')
-            ]);
-
-        } catch (\Exception $e) {
-            $this->logger->error('Error updating email stat for unsubscribe', [
-                'statId' => $emailStat->getId(),
-                'reason' => $reason,
-                'error' => $e->getMessage()
-            ]);
         }
     }
 }

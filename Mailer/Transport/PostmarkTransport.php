@@ -220,26 +220,38 @@ class PostmarkTransport extends AbstractTransport
 
     /**
      * Add Mautic-specific tracking metadata to Postmark payload
+     * This is CRITICAL for campaign statistics - the email_id enables bounce tracking!
      */
     private function addMauticTrackingMetadata(array &$payload, Email $email): void
     {
+        if (!isset($payload['Metadata'])) {
+            $payload['Metadata'] = [];
+        }
+
         // Extract Mautic tracking information from email headers
         $mauticHeaders = [];
         foreach ($email->getHeaders()->all() as $name => $header) {
+            $headerValue = $header->getBodyAsString();
+            
+            // Special handling for X-EMAIL-ID - this is critical for campaign stats!
+            if (strtoupper($name) === 'X-EMAIL-ID') {
+                $payload['Metadata']['email_id'] = $headerValue;
+                $this->logger?->info('Added email_id to Postmark metadata', [
+                    'email_id' => $headerValue
+                ]);
+            }
+            
+            // Capture all Mautic-related headers
             if (str_starts_with($name, 'X-Mautic-') || str_starts_with($name, 'X-Email-')) {
-                $mauticHeaders[$name] = $header->getBodyAsString();
+                $mauticHeaders[$name] = $headerValue;
             }
         }
 
-        // Add Mautic tracking data to Postmark metadata
+        // Add other Mautic tracking data to Postmark metadata
         if (!empty($mauticHeaders)) {
-            if (!isset($payload['Metadata'])) {
-                $payload['Metadata'] = [];
-            }
-
             // Add relevant Mautic tracking info
             foreach ($mauticHeaders as $headerName => $headerValue) {
-                $metadataKey = str_replace(['X-Mautic-', 'X-Email-'], '', $headerName);
+                $metadataKey = str_replace(['X-Mautic-', 'X-Email-', 'X-'], '', $headerName);
                 $payload['Metadata']['mautic_' . strtolower($metadataKey)] = $headerValue;
             }
 
