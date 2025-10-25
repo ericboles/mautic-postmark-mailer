@@ -78,17 +78,144 @@ class CallbackSubscriber implements EventSubscriberInterface
 
         $messageType = $payload['RecordType'] ?? null;
 
-        if ($messageType !== "SubscriptionChange") {
-            $event->setResponse(new Response("This callback only supports 'SubscriptionChange' events", Response::HTTP_BAD_REQUEST));
+        // Route to appropriate handler based on webhook type
+        switch ($messageType) {
+            case 'SubscriptionChange':
+                $this->handleSubscriptionChange($payload, $event);
+                break;
+                
+            case 'Bounce':
+                $this->handleBounce($payload, $event);
+                break;
+                
+            default:
+                $this->logger->warning('Unsupported Postmark webhook type', [
+                    'record_type' => $messageType
+                ]);
+                $event->setResponse(new Response("Unsupported webhook type: {$messageType}", Response::HTTP_BAD_REQUEST));
+                break;
+        }
+    }
+
+    /**
+     * Handle Postmark Bounce webhook - provides detailed bounce information
+     */
+    private function handleBounce(array $payload, TransportWebhookEvent $event): void
+    {
+        $recipient = $payload['Email'] ?? null;
+        $bounceType = $payload['Type'] ?? null;
+        $metadata = $payload['Metadata'] ?? [];
+        
+        if (!$recipient) {
+            $this->logger->error('Bounce webhook missing recipient email');
+            $event->setResponse(new Response('Missing recipient email', Response::HTTP_BAD_REQUEST));
             return;
         }
 
-        $reason = $payload['SuppressionReason'];
-        $suppressSending = filter_var($payload['SuppressSending'], FILTER_VALIDATE_BOOLEAN);
+        $this->logger->info('Processing Postmark bounce', [
+            'recipient' => $recipient,
+            'bounce_type' => $bounceType,
+            'bounce_name' => $payload['Name'] ?? 'Unknown'
+        ]);
+
+        // Extract email ID from metadata for campaign statistics
+        $emailId = null;
+        if (!empty($metadata)) {
+            $emailId = $metadata['email_id'] ?? $metadata['mautic_email_id'] ?? null;
+            if ($emailId !== null) {
+                $emailId = (int) $emailId;
+            }
+        }
+
+        // Build detailed comment with full bounce information
+        $commentParts = [];
+        
+        if (!empty($payload['Name'])) {
+            $commentParts[] = "Type: {$payload['Name']}";
+        }
+        
+        if (!empty($payload['Description'])) {
+            $commentParts[] = "Description: {$payload['Description']}";
+        }
+        
+        if (!empty($payload['Details'])) {
+            $commentParts[] = "Details: {$payload['Details']}";
+        }
+        
+        // Include truncated SMTP conversation if available
+        if (!empty($payload['Content'])) {
+            $smtpContent = substr($payload['Content'], 0, 500);
+            if (strlen($payload['Content']) > 500) {
+                $smtpContent .= '... (truncated)';
+            }
+            $commentParts[] = "SMTP: {$smtpContent}";
+        }
+        
+        // Add bounce date
+        if (!empty($payload['BouncedAt'])) {
+            $commentParts[] = "Bounced: {$payload['BouncedAt']}";
+        }
+        
+        $comment = implode("\n", $commentParts);
+        if (empty($comment)) {
+            $comment = 'Hard bounce (no details provided)';
+        }
+
+        // Process based on bounce type
+        if ($bounceType === 'HardBounce') {
+            $this->transportCallback->addFailureByAddress(
+                $recipient,
+                $comment,
+                DNC::BOUNCED,
+                $emailId
+            );
+            
+            $this->logger->info('Hard bounce processed with detailed information', [
+                'recipient' => $recipient,
+                'email_id' => $emailId,
+                'details_length' => strlen($comment)
+            ]);
+        } elseif ($bounceType === 'SpamComplaint') {
+            // Spam complaints can also come through bounce webhook
+            $this->transportCallback->addFailureByAddress(
+                $recipient,
+                $comment,
+                DNC::UNSUBSCRIBED,
+                $emailId
+            );
+            
+            $this->logger->info('Spam complaint processed', [
+                'recipient' => $recipient,
+                'email_id' => $emailId
+            ]);
+        } else {
+            // Soft bounces, transient issues, etc.
+            $this->logger->info('Non-permanent bounce received (not processing)', [
+                'recipient' => $recipient,
+                'bounce_type' => $bounceType
+            ]);
+        }
+
+        $event->setResponse(new Response('Postmark Bounce webhook processed'));
+    }
+
+    /**
+     * Handle Postmark SubscriptionChange webhook - for suppressions and unsubscribes
+     */
+    private function handleSubscriptionChange(array $payload, TransportWebhookEvent $event): void
+    {
+        $reason = $payload['SuppressionReason'] ?? null;
+        $suppressSending = filter_var($payload['SuppressSending'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $recipient = $payload['Recipient'] ?? null;
 
+        if (!$recipient) {
+            $this->logger->error('SubscriptionChange webhook missing recipient');
+            $event->setResponse(new Response('Missing recipient', Response::HTTP_BAD_REQUEST));
+            return;
+        }
 
-        if(!$suppressSending){
+        // Handle reactivation (SuppressSending = false)
+        if (!$suppressSending) {
             $this->logger->info('Removing dnc for recipient ' . $recipient);
             $this->removeFailureByAddress($recipient);
             $event->setResponse(new Response('Postmark Callback processed'));
@@ -126,30 +253,32 @@ class CallbackSubscriber implements EventSubscriberInterface
 
         // Process the suppression using TransportCallback
         // The 4th parameter (emailId) is CRITICAL - it enables campaign statistics!
+        // Note: HardBounce and SpamComplaint may also be processed by Bounce webhook
+        // TransportCallback handles duplicates gracefully
         switch($reason) {
             case 'ManualSuppression':
                 // Contact manually unsubscribed
                 $this->transportCallback->addFailureByAddress(
                     $recipient, 
-                    'unsubscribed', 
+                    'Manual unsubscribe via Postmark', 
                     DNC::UNSUBSCRIBED,
                     $emailId  // ← This enables campaign statistics!
                 );
                 break;
             case 'HardBounce':
-                // Email bounced - this will set isFailed=true on the Stat record
+                // Email bounced - Note: Bounce webhook provides more details
                 $this->transportCallback->addFailureByAddress(
                     $recipient, 
-                    'hard_bounce',
+                    'Hard bounce (from SubscriptionChange webhook)',
                     DNC::BOUNCED,
                     $emailId  // ← This enables campaign statistics!
                 );
                 break;
             case 'SpamComplaint':
-                // Marked as spam
+                // Marked as spam - Note: Bounce webhook may provide more details
                 $this->transportCallback->addFailureByAddress(
                     $recipient, 
-                    'spam_complaint',
+                    'Spam complaint (from SubscriptionChange webhook)',
                     DNC::UNSUBSCRIBED,
                     $emailId  // ← This enables campaign statistics!
                 );

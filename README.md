@@ -15,8 +15,28 @@ Although, if you want to thank me and want to keep seeing me struggle with PHP a
 This plugin enable Mautic 5.x to run Postmark as an email transport. Features:
 
 - API transport.
-- Bounce webhook handling. This plugin will unsubscribe contacts in Mautic based on the hard bounces while Postmark will take care of the soft bounce retries.
-- Supports Re-Subscribes. The DNC flag will be removed when the webhhook sends `SuppressSending: false`
+- **Bounce webhook handling** with detailed bounce information. This plugin supports both Postmark webhook types:
+  - **Bounce webhook**: Captures detailed bounce information including bounce type, description, SMTP details, and full bounce content for comprehensive debugging
+  - **SubscriptionChange webhook**: Handles suppressions, manual unsubscribes, and re-subscribes
+- **Campaign statistics tracking**: Bounce and unsubscribe events are properly linked to email campaigns for accurate reporting
+- **Suppression list sync**: Automatically re-syncs contacts to Mautic DNC when sending fails due to Postmark suppression list
+- **Re-Subscribe support**: The DNC flag will be removed when the webhook sends `SuppressSending: false`
+
+#### Webhook Configuration
+
+To enable full bounce tracking with detailed information, configure **both** webhooks in your Postmark server:
+
+**Webhook URL**: `https://your-mautic-domain.com/mailer/callback`
+
+1. **Bounce webhook** (recommended):
+   - Provides detailed bounce information (type, description, SMTP details, full content)
+   - Captures hard bounces and spam complaints with complete diagnostic data
+
+2. **SubscriptionChange webhook**:
+   - Handles manual suppressions and unsubscribes
+   - Processes re-activations (when `SuppressSending: false`)
+
+**Note**: Both webhooks use the same Mautic endpoint (`/mailer/callback`). This is Mautic's standard webhook endpoint for all email transports. The Postmark plugin will only process webhooks when Postmark is configured as your active email transport. The plugin automatically routes webhooks to the appropriate handler based on the `RecordType` field.
 
 Be aware that there is a existing symfony postmark bridge, but no recent version is compatible with Mautic 5 and has a webhook support.
 

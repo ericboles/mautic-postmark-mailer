@@ -108,6 +108,101 @@ class CallbackSubscriberTest extends MauticMysqlTestCase
     }
 
     /**
+     * Test the new Bounce webhook with detailed bounce information
+     */
+    public function testPostmarkBounceWebhookWithDetails(): void
+    {
+        $parameters = [
+            'RecordType' => 'Bounce',
+            'MessageStream' => 'outbound',
+            'ID' => 42,
+            'Type' => 'HardBounce',
+            'TypeCode' => 1,
+            'Name' => 'Hard bounce',
+            'Tag' => 'my-tag',
+            'MessageID' => '883953f4-6105-42a2-a16a-77a8eac79483',
+            'ServerID' => 123456,
+            'Description' => 'The server was unable to deliver your message (ex: unknown user, mailbox not found).',
+            'Details' => 'Test bounce details',
+            'Email' => 'bounce-test@example.com',
+            'From' => 'sender@example.com',
+            'BouncedAt' => '2023-10-01T12:00:00Z',
+            'DumpAvailable' => true,
+            'Inactive' => true,
+            'CanActivate' => false,
+            'Subject' => 'Test Email',
+            'Content' => 'SMTP conversation: 550 5.1.1 User unknown',
+            'Metadata' => [
+                'email_id' => '123',
+                'custom_field' => 'value',
+            ],
+        ];
+
+        $contact = $this->createContact('bounce-test@example.com');
+        $this->em->flush();
+
+        $this->client->request(Request::METHOD_POST, '/mailer/callback', $parameters);
+        $response = $this->client->getResponse();
+        Assert::assertSame('Postmark Bounce webhook processed', $response->getContent());
+        Assert::assertSame(200, $response->getStatusCode());
+
+        // Verify DNC was created with detailed bounce information
+        $dnc = $contact->getDoNotContact()->current();
+        Assert::assertNotNull($dnc);
+        Assert::assertSame('email', $dnc->getChannel());
+        Assert::assertSame(DoNotContact::BOUNCED, $dnc->getReason());
+        
+        // Verify detailed bounce information is in the comment
+        $comments = $dnc->getComments();
+        Assert::assertStringContainsString('Type: Hard bounce', $comments);
+        Assert::assertStringContainsString('Description: The server was unable to deliver', $comments);
+        Assert::assertStringContainsString('Details: Test bounce details', $comments);
+        Assert::assertStringContainsString('SMTP: 550 5.1.1 User unknown', $comments);
+        Assert::assertStringContainsString('Bounced: 2023-10-01T12:00:00Z', $comments);
+    }
+
+    /**
+     * Test Bounce webhook with SpamComplaint type
+     */
+    public function testPostmarkBounceWebhookSpamComplaint(): void
+    {
+        $parameters = [
+            'RecordType' => 'Bounce',
+            'MessageStream' => 'outbound',
+            'ID' => 43,
+            'Type' => 'SpamComplaint',
+            'TypeCode' => 512,
+            'Name' => 'Spam complaint',
+            'MessageID' => '883953f4-6105-42a2-a16a-77a8eac79484',
+            'ServerID' => 123456,
+            'Description' => 'The subscriber marked this message as spam.',
+            'Email' => 'spam-test@example.com',
+            'From' => 'sender@example.com',
+            'BouncedAt' => '2023-10-01T12:00:00Z',
+            'Metadata' => [],
+        ];
+
+        $contact = $this->createContact('spam-test@example.com');
+        $this->em->flush();
+
+        $this->client->request(Request::METHOD_POST, '/mailer/callback', $parameters);
+        $response = $this->client->getResponse();
+        Assert::assertSame('Postmark Bounce webhook processed', $response->getContent());
+        Assert::assertSame(200, $response->getStatusCode());
+
+        // Verify DNC was created with spam complaint reason
+        $dnc = $contact->getDoNotContact()->current();
+        Assert::assertNotNull($dnc);
+        Assert::assertSame('email', $dnc->getChannel());
+        Assert::assertSame(DoNotContact::UNSUBSCRIBED, $dnc->getReason());
+        
+        // Verify spam complaint info in comment
+        $comments = $dnc->getComments();
+        Assert::assertStringContainsString('Type: Spam complaint', $comments);
+        Assert::assertStringContainsString('Description: The subscriber marked this message as spam', $comments);
+    }
+
+    /**
      * @return array<mixed>
      */
     private function getParameters(string $supressionReason): array
