@@ -40,15 +40,19 @@ class CallbackSubscriber implements EventSubscriberInterface
 
     public function processCallbackRequest(TransportWebhookEvent $event): void
     {
-        $dsn = Dsn::fromString($this->coreParametersHelper->get('mailer_dsn'));
-
-        if (PostmarkTransport::MAUTIC_POSTMARK_API_SCHEME !== $dsn->getScheme()) {
-            return;
-        }
-
         $payload = null;
         $request = $event->getRequest();
         $contentType = $request->getContentType();
+        
+        // Log raw webhook for debugging
+        $this->logger->info('Webhook received', [
+            'content_type' => $contentType,
+            'user_agent' => $request->headers->get('User-Agent'),
+            'content_length' => $request->headers->get('Content-Length'),
+            'raw_content_preview' => substr($request->getContent(), 0, 200)
+        ]);
+        
+        // Parse the webhook payload first
         try {
             switch ($contentType) {
                 case 'json':
@@ -59,24 +63,56 @@ class CallbackSubscriber implements EventSubscriberInterface
                     break;
             }
         } catch (\Exception $e) {
-            $this->logger->error('JSON decoding error: ' . $e->getMessage());
+            $this->logger->error('Postmark webhook JSON decoding error', [
+                'error' => $e->getMessage(),
+                'content' => $request->getContent()
+            ]);
             $event->setResponse(new Response('Invalid JSON', Response::HTTP_BAD_REQUEST));
             return;
         }
         
-
         // Check data
         if (!is_array($payload)) {
             $message = 'There is no data to process.';
-            $this->logger->error($message . $event->getRequest()->getContent());
+            $this->logger->error('Postmark webhook - no data', [
+                'content' => $request->getContent(),
+                'payload_type' => gettype($payload)
+            ]);
             $event->setResponse(new Response($message, Response::HTTP_BAD_REQUEST));
             return;
         }
 
-
-        $this->logger->info('Postmark callback received');
-
+        // Check if this is actually a Postmark webhook by looking at the payload structure
+        // Postmark webhooks always have a RecordType field
         $messageType = $payload['RecordType'] ?? null;
+        
+        if (!$messageType) {
+            // Not a Postmark webhook, ignore silently
+            $this->logger->debug('Webhook does not have RecordType field - not a Postmark webhook', [
+                'payload_keys' => array_keys($payload)
+            ]);
+            return;
+        }
+
+        // This is a Postmark webhook - check if Postmark transport is configured
+        $dsn = Dsn::fromString($this->coreParametersHelper->get('mailer_dsn'));
+        $isMainTransport = (PostmarkTransport::MAUTIC_POSTMARK_API_SCHEME === $dsn->getScheme());
+
+        $this->logger->info('Postmark callback received', [
+            'record_type' => $messageType,
+            'is_main_transport' => $isMainTransport,
+            'user_agent' => $request->headers->get('User-Agent'),
+            'recipient' => $payload['Recipient'] ?? $payload['Email'] ?? 'unknown'
+        ]);
+
+        // For multi-transport setups: Process Postmark webhooks even if not main transport
+        // We identify Postmark webhooks by the RecordType field and User-Agent header
+        if (!$isMainTransport) {
+            $this->logger->warning('Processing Postmark webhook even though Postmark is not the main transport', [
+                'main_dsn_scheme' => $dsn->getScheme(),
+                'record_type' => $messageType
+            ]);
+        }
 
         // Route to appropriate handler based on webhook type
         switch ($messageType) {
