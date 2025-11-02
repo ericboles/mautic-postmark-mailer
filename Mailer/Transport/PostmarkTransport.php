@@ -101,71 +101,145 @@ class PostmarkTransport extends AbstractTransport implements TokenTransportInter
     #[\Override]
     protected function doSend(SentMessage $message): void
     {
-        try {
+        $envelope = $message->getEnvelope();
+        $email = MessageConverter::toEmail($message->getOriginalMessage());
+
+        // Check if this is a MauticMessage with metadata (batch mode)
+        if ($email instanceof MauticMessage) {
+            $metadata = $email->getMetadata();
             
-            $envelope = $message->getEnvelope();
-            $email = MessageConverter::toEmail($message->getOriginalMessage());
+            if (!empty($metadata)) {
+                // This is a batch send - metadata contains all recipients
+                $this->logger->info('Postmark batch mode detected', [
+                    'recipient_count' => count($metadata),
+                    'recipients' => array_keys($metadata)
+                ]);
+                
+                // Send to each recipient individually
+                $this->sendToMultipleRecipients($email, $envelope, $metadata);
+                return;
+            }
+        }
 
-            $response = $this->client->request('POST', 'https://'.$this->getEndpoint().'/email', [
-                'headers' => [
-                    'Accept' => 'application/json',
-                    'X-Postmark-Server-Token' => $this->apiKey,
-                ],
-                'json' => $this->getPayload($email, $envelope),
-            ]);
+        // Single recipient send (original behavior)
+        $this->sendSingleEmail($email, $envelope, $message);
+    }
 
-            $statusCode = $response->getStatusCode();
-            $result = $response->toArray(false);
+    /**
+     * Send email to multiple recipients (batch mode with metadata)
+     */
+    private function sendToMultipleRecipients(MauticMessage $email, Envelope $envelope, array $metadata): void
+    {
+        $this->logger->info('Sending to multiple recipients via Postmark', [
+            'count' => count($metadata)
+        ]);
 
-            if (200 !== $statusCode) {
-                // Handle suppressed recipients (on Postmark suppression list)
-                if (self::CODE_INACTIVE_RECIPIENT === $result['ErrorCode']) {
-                    // Get recipient email address
-                    $recipients = $envelope->getRecipients();
-                    $recipientEmail = !empty($recipients) ? $recipients[0]->getAddress() : 'unknown';
+        foreach ($metadata as $recipient => $recipientData) {
+            try {
+                // Create a new message for this specific recipient
+                $recipientEmail = clone $email;
+                
+                // Clear all recipients and set only this one
+                $recipientEmail->to($recipient);
+                $recipientEmail->cc();
+                $recipientEmail->bcc();
+                
+                // Apply tokens for this recipient if provided
+                if (!empty($recipientData['tokens'])) {
+                    $subject = $email->getSubject();
+                    $htmlBody = $email->getHtmlBody();
+                    $textBody = $email->getTextBody();
                     
-                    // Extract email ID for proper stat tracking
-                    $emailId = null;
-                    foreach ($email->getHeaders()->all() as $name => $header) {
-                        if (strtoupper($name) === 'X-EMAIL-ID') {
-                            $emailId = (int) $header->getBodyAsString();
-                            break;
-                        }
+                    foreach ($recipientData['tokens'] as $token => $value) {
+                        $subject = str_replace($token, $value, $subject);
+                        $htmlBody = str_replace($token, $value, $htmlBody);
+                        $textBody = str_replace($token, $value, $textBody);
                     }
                     
-                    // Re-sync to Mautic DNC - Postmark suppression list is source of truth
-                    // The 4th parameter (emailId) ensures campaign stats are updated
-                    $this->callback->addFailureByAddress(
-                        $recipientEmail,
-                        'Postmark Suppression: ' . ($result['Message'] ?? 'Recipient on suppression list'),
-                        DoNotContact::BOUNCED,
-                        $emailId
-                    );
-                    
-                    // Log the sync action for admin awareness
-                    $this->logger->warning('Contact reactivated in Mautic but suppressed in Postmark - re-synced to DNC', [
-                        'recipient' => $recipientEmail,
-                        'email_id' => $emailId,
-                        'postmark_error' => $result['Message'] ?? 'Unknown',
-                        'postmark_error_code' => $result['ErrorCode'],
-                        'action' => 'Re-added to Mautic DNC list',
-                        'note' => 'Remove from Postmark suppression list if reactivation was intentional'
-                    ]);
-                    
-                    // Return without throwing exception - allows other emails to continue
-                    return;
+                    $recipientEmail->subject($subject);
+                    $recipientEmail->html($htmlBody);
+                    $recipientEmail->text($textBody);
                 }
-    
-                throw new HttpTransportException('Unable to send an email: '.$result['Message'].\sprintf(' (code %d).', $result['ErrorCode']), $response);
+                
+                // Create a SentMessage wrapper for this recipient
+                $sentMessage = new SentMessage($recipientEmail, $envelope);
+                
+                // Send to this recipient
+                $this->sendSingleEmail($recipientEmail, $envelope, $sentMessage);
+                
+                $this->logger->debug('Email sent to recipient', [
+                    'recipient' => $recipient
+                ]);
+                
+            } catch (\Exception $e) {
+                // Log but don't stop - continue to other recipients
+                $this->logger->error('Failed to send to recipient', [
+                    'recipient' => $recipient,
+                    'error' => $e->getMessage()
+                ]);
             }
-    
-            $message->setMessageId($result['MessageID']);
+        }
+    }
 
-        } catch (DecodingExceptionInterface) {
-            throw new HttpTransportException('Unable to send an email: '.$response->getContent(false).\sprintf(' (code %d).', $statusCode), $response);
-        } catch (TransportExceptionInterface $e) {
-            throw new HttpTransportException('Could not reach the remote Postmark server.', $response, 0, $e);
-        } 
+    /**
+     * Send a single email (original doSend logic)
+     */
+    private function sendSingleEmail(Email $email, Envelope $envelope, SentMessage $message): void
+    {
+        $response = $this->client->request('POST', 'https://'.$this->getEndpoint().'/email', [
+            'headers' => [
+                'Accept' => 'application/json',
+                'X-Postmark-Server-Token' => $this->apiKey,
+            ],
+            'json' => $this->getPayload($email, $envelope),
+        ]);
+
+        $statusCode = $response->getStatusCode();
+        $result = $response->toArray(false);
+
+        if (200 !== $statusCode) {
+            // Handle suppressed recipients (on Postmark suppression list)
+            if (self::CODE_INACTIVE_RECIPIENT === $result['ErrorCode']) {
+                // Get recipient email address
+                $recipients = $envelope->getRecipients();
+                $recipientEmail = !empty($recipients) ? $recipients[0]->getAddress() : 'unknown';
+                
+                // Extract email ID for proper stat tracking
+                $emailId = null;
+                foreach ($email->getHeaders()->all() as $name => $header) {
+                    if (strtoupper($name) === 'X-EMAIL-ID') {
+                        $emailId = (int) $header->getBodyAsString();
+                        break;
+                    }
+                }
+                
+                // Re-sync to Mautic DNC - Postmark suppression list is source of truth
+                // The 4th parameter (emailId) ensures campaign stats are updated
+                $this->callback->addFailureByAddress(
+                    $recipientEmail,
+                    'Postmark Suppression: ' . ($result['Message'] ?? 'Recipient on suppression list'),
+                    DoNotContact::BOUNCED,
+                    $emailId
+                );
+                
+                // Log the sync action for admin awareness
+                $this->logger->warning('Contact reactivated in Mautic but suppressed in Postmark - re-synced to DNC', [
+                    'recipient' => $recipientEmail,
+                    'email_id' => $emailId,
+                    'postmark_error' => $result['Message'] ?? 'Unknown',
+                    'postmark_error_code' => $result['ErrorCode'],
+                    'action' => 'Re-added to Mautic DNC list',
+                    'note' => 'Remove from Postmark suppression list if reactivation was intentional'
+                ]);
+                
+                // Return without throwing exception - allows other emails to continue
+                return;
+            }
+
+            throw new HttpTransportException('Unable to send an email: '.$result['Message'].\sprintf(' (code %d).', $result['ErrorCode']), $response);
+        }
+
+        $message->setMessageId($result['MessageID']);
     }
 
     private function getPayload(Email $email, Envelope $envelope): array
