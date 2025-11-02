@@ -131,16 +131,22 @@ class PostmarkTransport extends AbstractTransport implements TokenTransportInter
     private function sendToMultipleRecipients(MauticMessage $email, Envelope $envelope, array $metadata): void
     {
         $this->logger->info('Sending to multiple recipients via Postmark', [
-            'count' => count($metadata)
+            'count' => count($metadata),
+            'recipients' => array_keys($metadata)
         ]);
 
-        foreach ($metadata as $recipient => $recipientData) {
+        foreach ($metadata as $recipientAddress => $recipientData) {
             try {
+                $this->logger->debug('Processing recipient', [
+                    'recipient' => $recipientAddress,
+                    'has_tokens' => !empty($recipientData['tokens'])
+                ]);
+                
                 // Create a new message for this specific recipient
                 $recipientEmail = clone $email;
                 
                 // Clear all recipients and set only this one
-                $recipientEmail->to($recipient);
+                $recipientEmail->to($recipientAddress);
                 $recipientEmail->cc();
                 $recipientEmail->bcc();
                 
@@ -161,20 +167,26 @@ class PostmarkTransport extends AbstractTransport implements TokenTransportInter
                     $recipientEmail->text($textBody);
                 }
                 
+                // Create a new envelope with ONLY this recipient
+                $newEnvelope = new Envelope(
+                    $envelope->getSender(),
+                    [new Address($recipientAddress)]
+                );
+                
                 // Create a SentMessage wrapper for this recipient
-                $sentMessage = new SentMessage($recipientEmail, $envelope);
+                $sentMessage = new SentMessage($recipientEmail, $newEnvelope);
                 
                 // Send to this recipient
-                $this->sendSingleEmail($recipientEmail, $envelope, $sentMessage);
+                $this->sendSingleEmail($recipientEmail, $newEnvelope, $sentMessage);
                 
-                $this->logger->debug('Email sent to recipient', [
-                    'recipient' => $recipient
+                $this->logger->info('Email sent successfully', [
+                    'recipient' => $recipientAddress
                 ]);
                 
             } catch (\Exception $e) {
                 // Log but don't stop - continue to other recipients
                 $this->logger->error('Failed to send to recipient', [
-                    'recipient' => $recipient,
+                    'recipient' => $recipientAddress,
                     'error' => $e->getMessage()
                 ]);
             }
