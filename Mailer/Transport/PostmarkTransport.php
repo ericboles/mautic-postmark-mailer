@@ -6,8 +6,8 @@ namespace MauticPlugin\PostmarkBundle\Mailer\Transport;
 
 use Mautic\EmailBundle\Helper\MailHelper;
 use Mautic\EmailBundle\Mailer\Message\MauticMessage;
-// use Mautic\EmailBundle\Mailer\Transport\TokenTransportInterface;
-// use Mautic\EmailBundle\Mailer\Transport\TokenTransportTrait;
+use Mautic\EmailBundle\Mailer\Transport\TokenTransportInterface;
+use Mautic\EmailBundle\Mailer\Transport\TokenTransportTrait;
 use Mautic\EmailBundle\Model\TransportCallback;
 use Mautic\LeadBundle\Entity\DoNotContact;
 use Psr\EventDispatcher\EventDispatcherInterface;
@@ -34,8 +34,10 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 use Symfony\Component\Mailer\Transport\AbstractTransport;
 
-class PostmarkTransport extends AbstractTransport
+class PostmarkTransport extends AbstractTransport implements TokenTransportInterface
 {
+    use TokenTransportTrait;
+
     public const MAUTIC_POSTMARK_API_SCHEME = 'mautic+postmark+api';
 
     public const POSTMARK_HOST = 'api.postmarkapp.com';
@@ -79,6 +81,21 @@ class PostmarkTransport extends AbstractTransport
     public function __toString(): string
     {
         return sprintf(self::MAUTIC_POSTMARK_API_SCHEME.'://%s', $this->host).($this->messageStream ? '?messageStream='.$this->messageStream : '');
+    }
+
+    /**
+     * Return the max number of to addresses allowed per batch.
+     * 
+     * Phase 1 Implementation: Return 1 to signal tokenization support while maintaining
+     * one-by-one sending behavior (same as when Postmark is default transport).
+     * This fixes the MultipleTransportBundle issue where only the first recipient receives
+     * the email when Postmark is configured as a secondary transport.
+     * 
+     * Future Phase 2: Can be increased to 500 to enable Postmark's batch API for performance.
+     */
+    public function getMaxBatchLimit(): int
+    {
+        return 1; // Phase 1: Disable batching, enable tokenization support
     }
 
     #[\Override]

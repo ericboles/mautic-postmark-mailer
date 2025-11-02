@@ -14,7 +14,8 @@ Although, if you want to thank me and want to keep seeing me struggle with PHP a
 
 This plugin enable Mautic 5.x to run Postmark as an email transport. Features:
 
-- API transport.
+- API transport with tokenization support for multi-transport setups
+- **Multi-transport compatibility**: Works correctly as both primary and secondary transport (compatible with MultipleTransportBundle)
 - **Bounce webhook handling** with detailed bounce information. This plugin supports both Postmark webhook types:
   - **Bounce webhook**: Captures detailed bounce information including bounce type, description, SMTP details, and full bounce content for comprehensive debugging
   - **SubscriptionChange webhook**: Handles suppressions, manual unsubscribes, and re-subscribes
@@ -36,7 +37,17 @@ To enable full bounce tracking with detailed information, configure **both** web
    - Handles manual suppressions and unsubscribes
    - Processes re-activations (when `SuppressSending: false`)
 
-**Note**: Both webhooks use the same Mautic endpoint (`/mailer/callback`). This is Mautic's standard webhook endpoint for all email transports. The Postmark plugin will only process webhooks when Postmark is configured as your active email transport. The plugin automatically routes webhooks to the appropriate handler based on the `RecordType` field.
+**Note**: Both webhooks use the same Mautic endpoint (`/mailer/callback`). This is Mautic's standard webhook endpoint for all email transports. The Postmark plugin will process webhooks from Postmark regardless of whether it's configured as the primary or secondary transport, identified by the `RecordType` field in the payload.
+
+#### Multi-Transport Support
+
+This plugin implements `TokenTransportInterface`, making it compatible with multi-transport setups (such as the MultipleTransportBundle). When Postmark is configured as a secondary transport:
+
+- All recipients will receive emails correctly (not just the first recipient)
+- Campaign emails and bulk sends work as expected
+- Webhook processing works regardless of which transport is configured as primary
+
+The plugin currently sends emails one-by-one for reliability. Future versions may implement Postmark's batch API (up to 500 emails per request) for improved performance.
 
 Be aware that there is a existing symfony postmark bridge, but no recent version is compatible with Mautic 5 and has a webhook support.
 
