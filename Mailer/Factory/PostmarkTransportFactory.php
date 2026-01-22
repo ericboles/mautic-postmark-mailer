@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MauticPlugin\PostmarkBundle\Mailer\Factory;
 
+use Doctrine\ORM\EntityManagerInterface;
 use Mautic\EmailBundle\Model\TransportCallback;
 use MauticPlugin\PostmarkBundle\Mailer\Transport\PostmarkTransport;
 use Psr\Log\LoggerInterface;
@@ -20,8 +21,9 @@ class PostmarkTransportFactory extends AbstractTransportFactory
 {
     public function __construct(
         private TransportCallback $transportCallback,
-        private TranslatorInterface $translator,
         EventDispatcherInterface $eventDispatcher,
+        private TranslatorInterface $translator,
+        private EntityManagerInterface $entityManager,
         HttpClientInterface $client = null,
         LoggerInterface $logger = null
     ) {
@@ -51,6 +53,7 @@ class PostmarkTransportFactory extends AbstractTransportFactory
                 $this->getPassword($dsn),
                 $messageStream,
                 $this->transportCallback,
+                $this->entityManager,
                 $this->client,
                 $this->dispatcher,
                 $this->logger

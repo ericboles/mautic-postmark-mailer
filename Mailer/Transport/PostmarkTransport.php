@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MauticPlugin\PostmarkBundle\Mailer\Transport;
 
+use Doctrine\ORM\EntityManagerInterface;
+use Mautic\EmailBundle\Entity\Email as MauticEmailEntity;
 use Mautic\EmailBundle\Helper\MailHelper;
 use Mautic\EmailBundle\Mailer\Message\MauticMessage;
 use Mautic\EmailBundle\Mailer\Transport\TokenTransportInterface;
@@ -67,6 +69,7 @@ class PostmarkTransport extends AbstractTransport implements TokenTransportInter
         private string $apiKey,
         string $stream,
         private TransportCallback $callback,
+        private EntityManagerInterface $entityManager,
         ?HttpClientInterface $client = null,
         ?EventDispatcherInterface $dispatcher = null,
         ?LoggerInterface $logger = null
@@ -261,7 +264,7 @@ class PostmarkTransport extends AbstractTransport implements TokenTransportInter
             'To' => implode(',', $this->stringifyAddresses($this->getRecipients($email, $envelope))),
             'Cc' => implode(',', $this->stringifyAddresses($email->getCc())),
             'Bcc' => implode(',', $this->stringifyAddresses($email->getBcc())),
-            'ReplyTo' => implode(',', $this->stringifyAddresses($email->getReplyTo())),
+            'ReplyTo' => implode(',', $this->stringifyAddresses($this->getReplyToAddresses($email))),
             'Subject' => $email->getSubject(),
             'TextBody' => $email->getTextBody(),
             'HtmlBody' => $email->getHtmlBody(),
@@ -399,4 +402,63 @@ class PostmarkTransport extends AbstractTransport implements TokenTransportInter
     // {
     //     return 500;
     // }
+
+    /**
+     * Get reply-to addresses with priority to email entity configuration.
+     * This ensures broadcast emails use the reply-to set on the email entity.
+     *
+     * @return Address[]
+     */
+    private function getReplyToAddresses(Email $email): array
+    {
+        // For broadcast emails, check if email entity has a reply-to configured
+        if ($email instanceof MauticMessage) {
+            // First try to get email ID from headers (most reliable)
+            $emailId = null;
+            foreach ($email->getHeaders()->all() as $name => $header) {
+                if (strtoupper($name) === 'X-EMAIL-ID') {
+                    $emailId = (int) $header->getBodyAsString();
+                    break;
+                }
+            }
+            
+            // If not in headers, try metadata
+            if ($emailId === null) {
+                $emailId = $this->getEmailIdFromMetadata($email->getMetadata());
+            }
+            
+            if ($emailId !== null) {
+                $emailEntity = $this->entityManager->getRepository(MauticEmailEntity::class)->find($emailId);
+                if ($emailEntity) {
+                    $entityReplyTo = $emailEntity->getReplyToAddress();
+                    
+                    if (!empty($entityReplyTo)) {
+                        $entityReplyTo = explode(',', $entityReplyTo);
+                        $addresses = [];
+                        foreach ($entityReplyTo as $value) {
+                            $addresses[] = new Address(trim($value));
+                        }
+                        
+                        return $addresses;
+                    }
+                }
+            }
+        }
+        
+        // Fall back to what's already set on the message
+        return $email->getReplyTo();
+    }
+
+    /**
+     * Extract email ID from message metadata.
+     */
+    private function getEmailIdFromMetadata(array $metadata): ?int
+    {
+        foreach ($metadata as $recipientData) {
+            if (isset($recipientData['emailId'])) {
+                return (int) $recipientData['emailId'];
+            }
+        }
+        return null;
+    }
 }
