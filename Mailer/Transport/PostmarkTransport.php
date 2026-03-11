@@ -169,7 +169,20 @@ class PostmarkTransport extends AbstractTransport implements TokenTransportInter
                     $recipientEmail->html($htmlBody);
                     $recipientEmail->text($textBody);
                 }
-                
+
+                // Replace stale List-Unsubscribe with the per-contact
+                // {unsubscribe_url} token from metadata. This URL is generated
+                // per-contact by BuilderSubscriber and supports RFC 8058
+                // one-click POST unsubscribe.
+                $unsubUrl = $recipientData['tokens']['{unsubscribe_url}'] ?? null;
+                if ($unsubUrl) {
+                    $headers = $recipientEmail->getHeaders();
+                    if ($headers->has('List-Unsubscribe')) {
+                        $headers->remove('List-Unsubscribe');
+                    }
+                    $headers->addTextHeader('List-Unsubscribe', '<'.$unsubUrl.'>');
+                }
+
                 // Create a new envelope with ONLY this recipient
                 $newEnvelope = new Envelope(
                     $envelope->getSender(),
