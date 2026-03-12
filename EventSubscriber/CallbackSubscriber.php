@@ -198,7 +198,21 @@ class CallbackSubscriber implements EventSubscriberInterface
         }
 
         // Process based on bounce type
-        if ($bounceType === 'HardBounce') {
+        // HardBounce (TypeCode 1): permanent delivery failure
+        // Transient (TypeCode 2): undeliverable (repeated soft bounces become permanent)
+        // Blocked (TypeCode 100006): ISP or recipient server blocked delivery
+        // AutoResponder (TypeCode 64): normally an out-of-office reply (ignore), BUT Postmark
+        //   misclassifies some NDRs as AutoResponder when the bounce message body starts with
+        //   "auto-re". In those cases the Details field contains a real 5xx SMTP error — detect
+        //   and treat those as hard bounces.
+        $isAutoresponderMisclassified = ($bounceType === 'AutoResponder')
+            && $this->containsPermanentSmtpFailure($payload['Details'] ?? '');
+
+        if (in_array($bounceType, ['HardBounce', 'Transient', 'Blocked'], true) || $isAutoresponderMisclassified) {
+            if ($isAutoresponderMisclassified) {
+                $comment = "[Postmark misclassified as AutoResponder — permanent SMTP failure detected]\n" . $comment;
+            }
+
             $this->transportCallback->addFailureByAddress(
                 $recipient,
                 $comment,
@@ -206,8 +220,10 @@ class CallbackSubscriber implements EventSubscriberInterface
                 $emailId
             );
             
-            $this->logger->info('Hard bounce processed with detailed information', [
+            $this->logger->info('Bounce processed as DNC', [
                 'recipient' => $recipient,
+                'bounce_type' => $bounceType,
+                'misclassified_autoresponder' => $isAutoresponderMisclassified,
                 'email_id' => $emailId,
                 'details_length' => strlen($comment)
             ]);
@@ -224,8 +240,13 @@ class CallbackSubscriber implements EventSubscriberInterface
                 'recipient' => $recipient,
                 'email_id' => $emailId
             ]);
+        } elseif ($bounceType === 'AutoResponder') {
+            // True out-of-office / vacation auto-reply — do not DNC
+            $this->logger->info('AutoResponder (true out-of-office) received — ignoring', [
+                'recipient' => $recipient,
+            ]);
         } else {
-            // Soft bounces, transient issues, etc.
+            // Other bounce types (SoftBounce, etc.) - log but don't set DNC
             $this->logger->info('Non-permanent bounce received (not processing)', [
                 'recipient' => $recipient,
                 'bounce_type' => $bounceType
@@ -233,6 +254,22 @@ class CallbackSubscriber implements EventSubscriberInterface
         }
 
         $event->setResponse(new Response('Postmark Bounce webhook processed'));
+    }
+
+    /**
+     * Detect SMTP 5xx permanent failure codes in a Postmark bounce Details string.
+     *
+     * Postmark occasionally misclassifies NDR messages as "AutoResponder" when the
+     * bounce body begins with "auto-re". The Details field still contains the real
+     * SMTP exchange, i.e. "550 5.1.1" or "550 5.4.1". A true out-of-office reply
+     * will never contain a 5xx status code in its Details.
+     *
+     * Matches patterns like: 550 5.1.1 / 550-5.4.1 / 554 5.7.1 etc.
+     */
+    private function containsPermanentSmtpFailure(string $details): bool
+    {
+        // SMTP permanent failure: 5xx response code followed by enhanced status 5.x.x
+        return (bool) preg_match('/\b5\d\d[\s\-]5\.\d+\.\d+/i', $details);
     }
 
     /**
